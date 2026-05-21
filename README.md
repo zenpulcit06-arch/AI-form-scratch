@@ -11,7 +11,7 @@
 This repository implements a **Non-Linear Binary Classifier** — a single-neuron engine capable of learning non-linear decision boundaries using:
 
 - **Logistic Regression** — probabilistic decision-making via Sigmoid activation
-- **Polynomial Feature Mapping** — transforms 1D input into an $N$-dimensional feature space
+- **Polynomial Feature Mapping** — transforms multi-dimensional input into a full monomial feature space via combinatorial expansion
 - **L2 Regularization (Ridge)** — prevents overfitting on high-degree polynomial models
 - **Vectorized Matrix Operations** — the entire dataset is treated as a matrix $X$, with weights as a vector $w$
 
@@ -27,7 +27,7 @@ AI-form-scratch/
 │   └── logistic_regression.f90   # Core math module: Fit, Standardize, Sigmoid, Accuracy
 ├── polynomial_regression/
 │   └── polynomialreg.f90         # Main orchestrator & polynomial feature generator
-├── makefile                      # Build system
+├── makefile                      # Cross-platform build system
 └── README.md
 ```
 
@@ -37,7 +37,8 @@ AI-form-scratch/
 
 | Feature | Description |
 |---|---|
-| **Polynomial Expansion** | Transforms scalar input $x$ into $(x, x^2, \dots, x^D)$ — a $D$-dimensional feature space |
+| **Polynomial Expansion** | Transforms $n$ input features into all monomials up to degree $D$ — a $\binom{n+D}{D}-1$ dimensional feature space |
+| **Combinatorial Feature Engine** | Enumerates all weak compositions via recursive `li_sol` — generates cross-terms like $x_1 x_2$, $x_1^2 x_2$, etc. |
 | **Vectorized Predictions** | Computes $\hat{y} = \sigma(Xw + b)$ as a single matrix operation |
 | **Z-Score Standardization** | Scales all features to mean $= 0$, S.D. $= 1$ to prevent gradient explosion |
 | **L2 Regularization** | Adds a weight-decay penalty to the loss to combat overfitting |
@@ -60,13 +61,17 @@ $$\hat{y} = \sigma(Xw + b)$$
 
 This eliminates per-sample loops and enables significant computational speedups on large datasets.
 
-### 3. Polynomial Feature Mapping
+### 3. Polynomial Feature Mapping via Combinatorics
 
-To solve non-linear problems (like the parabola test), the `Polynomial_reg` module transforms a scalar input $x$ into a $D$-dimensional vector:
+The `Polynomial_reg` module generates all monomials up to degree $D$ over $n$ input features. For $n=2$, $D=2$:
 
-$$x \rightarrow (x,\ x^2,\ x^3,\ \dots,\ x^D)$$
+$$x_1,\ x_2,\ x_1^2,\ x_1 x_2,\ x_2^2$$
 
-This allows a linear classifier to find **non-linear decision boundaries** in the original input space.
+The total number of expanded features is $\binom{n+D}{D} - 1$. This is computed using the log-gamma identity for numerical stability:
+
+$$\binom{n+D}{D} = \text{nint}\!\left(\exp\!\left(\ln\Gamma(n+D+1) - \ln\Gamma(n+1) - \ln\Gamma(D+1)\right)\right)$$
+
+The monomial exponent combinations are enumerated by `li_sol` — a recursive subroutine that generates all weak compositions of degree $d$ into $n$ non-negative parts. `sol_count` is passed by reference through the call stack rather than stored as module-level state, making the routine fully re-entrant and safe for future parallel use.
 
 ### 4. L2 Regularization (Ridge)
 
@@ -92,6 +97,8 @@ Maps any real-valued output to a probability in $(0, 1)$, turning the regression
 
 Ensure `gfortran` is installed (via MinGW/MSYS2 on Windows, or natively on Linux/macOS).
 
+The makefile auto-detects the OS and sets the correct binary extension and shell commands. It was written with assistance from Claude (Anthropic).
+
 **Using Make:**
 ```bash
 make
@@ -99,7 +106,7 @@ make
 
 **Manual compilation:**
 ```bash
-gfortran -O3 linear_regression/logistic_regression.f90 polynomial_regression/polynomialreg.f90 -o polyreg.exe
+gfortran -O3 linear_regression/logistic_regression.f90 polynomial_regression/polynomialreg.f90 -o ai_engine
 ```
 
 ---
@@ -108,7 +115,7 @@ gfortran -O3 linear_regression/logistic_regression.f90 polynomial_regression/pol
 
 ### Test Case 1: The Parabola
 
-The engine was verified on a dataset where $y = 1$ at the extremes and $y = 0$ in the center — a non-linear boundary no linear model can learn.
+The engine was verified on a 1D dataset where $y = 1$ at the extremes and $y = 0$ in the center — a non-linear boundary no linear model can learn.
 
 | $x$ | Label |
 |-----|-------|
@@ -125,54 +132,66 @@ The engine was verified on a dataset where $y = 1$ at the extremes and $y = 0$ i
 
 ---
 
-### Test Case 2: The Circle (`circle.csv`)
+### Test Case 2: The Circle (`circle.csv`) — Phase 1 (1D, broken)
 
-A 2D radial dataset with 50 points — inner points labelled 0 (near origin) and outer points labelled 1 (away from origin). This tests the engine on a genuinely 2D non-linear boundary using degree-2 polynomial features.
-
-**Run configuration:**
-
-| Parameter | Value |
-|-----------|-------|
-| Dataset | `circle.csv` (50 samples) |
-| Degree | 2 |
-| Learning Rate | 0.01 |
-| Lambda (L2) | 0.001 |
-| Iterations | 500,000 |
-
-**Training output:**
-
-The loss converged smoothly from an initial ~0.387 down to ~0.310, with early stopping triggered when the change per step fell below $10^{-8}$:
-
-```
-0.38657  →  0.33696  →  0.32221  →  0.31632  →  ...  →  0.30963
-```
-
-**Learned parameters:**
-
-| Parameter | Value |
-|-----------|-------|
-| Weight 1 ($x$) | 0.9971 |
-| Weight 2 ($x^2$) | 0.2594 |
-| Bias | −2.3377 |
-| Mean $(x,\ x^2)$ | 0.0480, 0.5716 |
-| S.D. $(x,\ x^2)$ | 0.7545, 0.6768 |
-
-**Final metrics:**
+A 2D radial dataset with 50 points fed through the Phase 1 single-column engine. The model only saw $x_1$, making it structurally impossible to learn the boundary.
 
 | Metric | Value |
 |--------|-------|
 | Final Loss | 0.3096 |
 | MSE | 0.5019 |
 
+**Observation:** MSE ~0.50 is essentially random-guess performance. This test exposed the Phase 1 limitation and directly motivated the multi-feature rewrite.
+
+---
+
+### Test Case 3: The Circle (`circle.csv`) — Phase 2 (2D, solved)
+
+The same radial dataset, now with 200 samples and both features read correctly. The engine expanded $(x_1, x_2)$ into 5 features — $x_1,\ x_2,\ x_1^2,\ x_1 x_2,\ x_2^2$ — and trained on the full 2D structure.
+
+**Run configuration:**
+
+| Parameter | Value |
+|-----------|-------|
+| Dataset | `circle.csv` (200 samples, 2 features + label) |
+| Degree | 2 |
+| Learning Rate | 0.03 |
+| Lambda (L2) | 0.005 |
+| Iterations | 2,500 |
+
+**Loss convergence:**
+
+```
+0.24396  →  0.18395  →  0.15638  →  0.13974  →  0.12832  →  0.12878 (final)
+```
+
+**Learned weights:**
+
+| Feature | Term | Weight |
+|---------|------|--------|
+| $w_1$ | $x_1$ | 0.254 |
+| $w_2$ | $x_2$ | −0.105 |
+| $w_3$ | $x_1^2$ | **3.217** |
+| $w_4$ | $x_1 x_2$ | 0.145 |
+| $w_5$ | $x_2^2$ | **2.928** |
+| Bias | — | 2.062 |
+
+**Final metrics:**
+
+| Metric | Value |
+|--------|-------|
+| Final Loss | 0.1288 |
+| MSE | 0.0306 |
+
 **Sample prediction:**
 
 ```
-Input: x = 2.0
-Probability: 0.826
-Classification: POSITIVE (1)
+Input: x₁ = 2.0,  x₂ = 3.0
+Probability:  1.000
+Classification: POSITIVE (1)   ✓  (point is far outside the origin — correctly outer)
 ```
 
-**Observations:** The relatively high MSE (~0.50) indicates the degree-2 polynomial expansion of a single coordinate is not expressive enough to fully capture a 2D radial boundary. The `circle.csv` dataset is inherently a 2-feature problem ($x_1$, $x_2$), where the true decision boundary is $x_1^2 + x_2^2 = r^2$. A proper solution would require reading both columns and expanding into cross-terms $(x_1,\ x_2,\ x_1^2,\ x_2^2,\ x_1 x_2)$. This test case motivates **Phase 2**: extending the engine to accept multi-feature input natively.
+**Key insight:** The dominant weights are $w_3 \approx 3.22$ and $w_5 \approx 2.93$ — the $x_1^2$ and $x_2^2$ terms. The model independently discovered that the decision boundary is determined by the sum of squared coordinates, i.e. $x_1^2 + x_2^2 \approx \text{const}$. This is the correct mathematical form of a circle. The MSE dropped from 0.50 (Phase 1) to 0.031 (Phase 2) — a 16× improvement.
 
 ---
 
@@ -235,9 +254,27 @@ Classification: POSITIVE (1)
 <details>
 <summary><strong>7. Single-Column Input Cannot Model 2D Boundaries</strong></summary>
 
-**Error:** Fed only the first column of `circle.csv` into the engine — the model saw one coordinate of each point but not both, making it structurally impossible to learn a radial boundary.
+**Error:** Fed only the first column of `circle.csv` into the Phase 1 engine — the model saw one coordinate per point but not both, making it impossible to learn a radial boundary.
 
-**Insight:** The high MSE (~0.50) on the circle dataset is a feature, not a bug — it correctly reveals the engine's current limitation. True 2D classification requires reading both $x_1$ and $x_2$ and computing cross-polynomial terms. This is the motivation for the multi-feature extension in Phase 2.
+**Insight:** The high MSE (~0.50) was not a tuning problem — it was a structural one. True 2D classification requires both $x_1$ and $x_2$ plus their cross-terms. This directly motivated Phase 2.
+
+</details>
+
+<details>
+<summary><strong>8. Module-Level <code>sol_count</code> Shared State</strong></summary>
+
+**Error:** `sol_count` was a module-level variable incremented inside `li_sol`. A second call to `make_poly` (e.g. at prediction time) would pick up the counter value left over from training instead of starting fresh, silently writing into the wrong rows of `res_matrix`.
+
+**Fix:** Removed `sol_count` from module scope entirely. It is now a local variable inside `make_poly` and passed into `li_sol` as an `intent(inout)` argument. Each call to `make_poly` owns its own counter — no shared state, no `reset()` subroutine needed, safe for future parallel use.
+
+</details>
+
+<details>
+<summary><strong>9. Re-allocation Crash in <code>standardize</code></strong></summary>
+
+**Error:** `z_score` is declared `allocatable` in `standardize`. When called a second time (at prediction), Fortran raised a runtime error: *"Attempting to allocate already allocated variable"* — because the variable was still marked as allocated from the first call.
+
+**Fix:** Added an `if (allocated(z_score)) deallocate(z_score)` guard immediately before the `allocate` call. Same fix applied to `y_predicted` in `fit` for consistency.
 
 </details>
 
@@ -245,8 +282,8 @@ Classification: POSITIVE (1)
 
 ## Roadmap
 
-- [x] Phase 1 — Polynomial Logistic Regression with L2 Regularization
-- [ ] Phase 2 — Multi-feature input support (read all columns; cross-polynomial terms)
+- [x] Phase 1 — Polynomial Logistic Regression with L2 Regularization (1D input)
+- [x] Phase 2 — Multi-feature input, combinatorial monomial expansion, concurrent-safe recursion
 - [ ] Phase 3 — Multi-layer Neural Network (Hidden Layers)
 - [ ] Phase 4 — Vectorized Backpropagation algorithm
 - [ ] Phase 5 — Multi-class Classification (Softmax)
