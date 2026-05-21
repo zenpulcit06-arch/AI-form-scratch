@@ -21,6 +21,8 @@ subroutine fit(y,x,size_of_data, rate_of_learn, n_feature , weight , bias,iterat
     last_loss = 0.0_real64
     weight(:) = 0.0_real64
     bias = 0.0_real64
+    
+    if (allocated(y_predicted)) deallocate(y_predicted)
     allocate(y_predicted(size_of_data))
 
     do i = 1,iteration
@@ -66,6 +68,7 @@ subroutine standardize(x,n_feature, size_of_data,mean,sd , z_score)
     real(real64), intent(inout) :: mean(n_feature) , sd(n_feature)
     integer(int64) :: j
 
+    if (allocated(z_score)) deallocate(z_score)
     allocate(z_score(size_of_data,n_feature))
 
     do concurrent(j = 1:n_feature)
