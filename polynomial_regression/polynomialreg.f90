@@ -50,10 +50,7 @@ contains
         deallocate(history)
     end function make_poly
 
-    ! Enumerates all weak compositions of L into n non-negative parts.
-    ! Each solution is one row of res; sol_count tracks how many have been written.
-    ! sol_count is local to make_poly and passed by reference — no shared module state,
-    ! safe for future do concurrent use when called per-sample or per-degree bucket.
+
     recursive subroutine li_sol(L, n, res, history, sol_count)
         integer(int64), intent(in)    :: L, n
         integer(int64), intent(inout) :: res(:,:), history(:), sol_count
@@ -65,9 +62,9 @@ contains
                 call li_sol(L - i, n - 1, res, history, sol_count)
             end do
         else
-            history(1)          = L
-            sol_count           = sol_count + 1
-            res(sol_count, :)   = history
+            history(1)        = L
+            sol_count         = sol_count + 1
+            res(sol_count, :) = history
         end if
     end subroutine li_sol
 
@@ -174,7 +171,7 @@ program main
 
         x_predict_poly = make_poly(x_predict_raw, degree, 1_int64, n_feature)
 
-        do j = 1, total_cols
+        do concurrent (j = 1:total_cols)
             if (sd(j) > 1.0e-9_real64) then
                 x_predict_scaled(j) = (x_predict_poly(1, j) - mean(j)) / sd(j)
             else
