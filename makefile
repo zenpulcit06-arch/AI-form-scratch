@@ -2,7 +2,7 @@
 #  Compiler & flags
 # ─────────────────────────────────────────────
 FC     = gfortran
-FFLAGS = -O3 -Wall -fcheck=all
+FFLAGS = -O3 -Wall -fcheck=all -I$(MODDIR)
 
 # ─────────────────────────────────────────────
 #  Paths
@@ -10,7 +10,8 @@ FFLAGS = -O3 -Wall -fcheck=all
 MODDIR  = modfiles
 TARGET  = ai_engine
 SOURCES = ./linear_regression/logistic_regression.f90 \
-          ./polynomial_regression/polynomialreg.f90
+          ./neural_network/neural_network.f90 \
+          ./main.f90
 
 # ─────────────────────────────────────────────
 #  OS detection  (Windows sets OS=Windows_NT)
