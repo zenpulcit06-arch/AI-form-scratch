@@ -124,3 +124,148 @@ subroutine fit(net,X,y,neurons1,neurons2,sample_size,rl,iteration,loss,n_feature
     end do
 end subroutine fit
 end module Layer
+
+
+module Network
+    use, intrinsic :: iso_fortran_env
+    use Logistic_regression, only: sigmoid
+    use Layer, only: relu
+    implicit none
+    private
+
+    type :: delta_t
+    real(real64), allocatable :: d(:,:)
+    end type
+
+    type, public :: layer
+        real(real64), allocatable :: W(:,:), b(:), H(:,:)
+    end type
+
+    public intialize_layer, forward_pass_network, allocate_delta, backward_pass_network,fit_network
+contains
+
+subroutine intialize_layer(lay, prev_neurons, current_neurons,sample_Size)
+    class(layer), intent(inout) :: lay
+    integer(int64), intent(in) :: prev_neurons, current_neurons,sample_Size
+
+    call random_seed()
+
+    if (allocated(lay%W)) deallocate(lay%W)
+    allocate(lay%W(prev_neurons,current_neurons))
+    call random_number(lay%W)
+    lay%W = (-1.0_real64 + 2.0_real64*lay%W) * &
+             sqrt(2.0_real64/real(prev_neurons,real64))
+
+    if (allocated(lay%b)) deallocate(lay%b)
+    allocate(lay%b(current_neurons))
+    lay%b(:) = 0.0_real64
+
+    if(allocated(lay%H)) deallocate(lay%H)
+    allocate(lay%H(sample_Size, current_neurons))
+    lay%H(:,:) = 0.0_real64
+end subroutine intialize_layer
+
+subroutine forward_pass_network(net,X,N)
+    class(layer), intent(inout) :: net(:)
+    integer(int64), intent(in) :: N
+    real(real64), intent(inout):: X(:,:)
+    integer(int64) :: i
+
+    select case (N)
+    case (1)
+        net(N)%H = sigmoid(matmul(X,net(N)%W) + spread(net(N)%b,1,size(X,1)))
+    case default 
+    net(1)%H = relu(matmul(X,net(1)%W) + spread(net(1)%b,1,size(X,1))) 
+
+    do i = 2, N-1
+        net(i)%H = relu(matmul(net(i-1)%H,net(i)%W) + spread(net(i)%b,1,&
+            size(net(i-1)%H,1)))
+    end do
+    
+    net(N)%H = sigmoid(matmul(net(N-1)%H,net(N)%W) + spread(net(N)%b,1,&
+            size(net(N-1)%H,1)))
+
+    end select
+end subroutine forward_pass_network
+
+subroutine allocate_delta(net,delta,sample_size,N)
+    class(delta_t), intent(inout) :: delta(:)
+    class(layer), intent(in) :: net(:)
+    integer(int64), intent(in) :: sample_size,N
+    integer(int64):: i
+
+    do i = 1, N
+        if (allocated(delta(i)%d)) deallocate(delta(i)%d)
+        allocate(delta(i)%d(sample_size,size(net(i)%W,2)))
+    end do
+end subroutine allocate_delta
+
+subroutine backward_pass_network(delta,net,X,y,y_cap,N,sample_size,rl)
+    class(delta_t), intent(inout) :: delta(:)
+    class(layer), intent(inout) :: net(:)
+    real(real64), intent(inout) :: X(:,:),y(:,:), y_cap(:,:)
+    integer(int64), intent(in) :: sample_size, N
+    integer(int64) :: i
+    real(real64), intent(in) :: rl
+    real(real64), allocatable :: dw(:,:),db(:)
+    delta(N)%d = y_cap - y
+
+    do i = N -1, 1,-1 
+        delta(i)%d = matmul(delta(i+1)%d, transpose(net(i+1)%W)) * merge(1.0_real64, 0.0_real64, net(i)%H > 0.0_real64)
+    end do
+
+    do i = 1,N
+        if (allocated(dw)) deallocate(dw)
+        allocate(dw(size(net(i)%W,1), size(net(i)%W,2)))
+
+        if (allocated(db)) deallocate(db)
+        allocate(db(size(delta(i)%d,2)))
+
+        if (i .ne. 1) then
+        dw = matmul(transpose(net(i-1)%H),delta(i)%d)/sample_size
+        else
+            dw = matmul(transpose(X),delta(i)%d)/sample_size
+        end if
+        db = sum(delta(i)%d,dim =1)/sample_size 
+        net(i)%W = net(i)%W - dw*rl
+        net(i)%b = net(i)%b - db*rl
+    end do
+
+end subroutine backward_pass_network
+
+subroutine fit_network(net,X,y,rl,iteration,sample_size,N,loss)
+    class(layer), intent(inout) :: net(:)
+    class(delta_t), allocatable :: delta(:)
+    real(real64), intent(inout) :: X(:,:),y(:,:),loss
+    real(real64), intent(in) :: rl
+    real(real64), allocatable :: y_predicted(:,:)
+    integer(int64),intent(in) :: N,iteration,sample_size
+    integer(int64) :: i
+    real(real64) :: last_loss
+
+    last_loss = 0.0_real64
+
+    if (allocated(delta)) deallocate(delta)
+    allocate(delta(N))
+    call allocate_delta(net, delta, sample_size, N)
+
+    if (allocated(y_predicted)) deallocate(y_predicted)
+    allocate(y_predicted(sample_size,size(net(N)%W,2)))
+
+    do i = 1, iteration
+        call forward_pass_network(net,X,N)
+
+        y_predicted = net(N)%H
+        
+        loss = -sum(y * log(y_predicted + 1.0e-15_real64) + (1.0_real64 - y) * &
+                log(1.0_real64 - y_predicted + 1.0e-15_real64)) / sample_size
+        
+        call backward_pass_network(delta,net,X,y,y_predicted,N,sample_size,rl)
+        if ( abs(last_loss - loss) .lt. 10e-8 ) then
+            exit
+        end if
+        last_loss = loss
+    end do
+end subroutine fit_network
+    
+end module Network

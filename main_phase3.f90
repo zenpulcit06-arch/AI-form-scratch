@@ -1,14 +1,13 @@
 program main
     use, intrinsic :: iso_fortran_env
-    use network
-
+    use Layer
+    use Logistic_regression, only: sigmoid
     implicit none
-    integer(int64) :: n_feature,sample_size, iteration,i,j,mode,N
-    integer(int64), allocatable :: neurons(:)
+    integer(int64) :: n_feature,sample_size, neurons1, neurons2, iteration,i,j,mode
     real(real64) :: learning_rate,loss
     real(real64), allocatable :: x(:,:), y(:,:) 
     character(len = 1000) :: filename
-    type(layer), allocatable :: net(:)
+    type(network) :: net
 
     print *, "Enter no. of feature"
     read(*,*) n_feature
@@ -16,36 +15,23 @@ program main
     print *, "Enter sample size"
     read(*,*) sample_size
 
+    print *, "Enter no. of neurons in hidden layer1"
+    read(*,*) neurons1
+
+    print *, "Enter no. of neurons in hidden layer2"
+    read(*,*) neurons2
+
     print *, 'Enter no. of iteration'
     read(*,*) iteration
 
     print *, 'Enter learning rate'
     read(*,*) learning_rate
 
-    print *, 'Enter no. of layers'
-    read(*,*) N
-
-    if (allocated(net)) deallocate(net)
-    allocate(net(N))
-    
-    if (allocated(neurons)) deallocate(neurons)
-    allocate(neurons(N))
-    
     if (allocated(x)) deallocate(x)
-    allocate(x(sample_size, n_feature))
-    if(allocated(y)) deallocate(y)
-    allocate(y(sample_size, 1))
+    allocate(x(sample_size,n_feature))
 
-    do i = 1, N
-        print *, 'Enter no. of neurons in layer',i
-        read(*,*) neurons(i)
-    end do
-
-    call intialize_layer(net(1),n_feature,neurons(1),sample_size)
-
-    do i = 2,N
-        call intialize_layer(net(i),neurons(i-1),neurons(i),sample_size)
-    end do
+    if (allocated(y)) deallocate(y)
+    allocate(y(sample_size, neurons2))
 
     mode = 0
     print *, 'Enter 1 for manual entry or 2 for CSV entry:'
@@ -73,7 +59,9 @@ program main
         end do
     end if
 
-    call fit_network(net,x,y,learning_rate,iteration,sample_size,N,loss)
+    call intialize(net,neurons1,neurons2,n_feature,sample_size)
+    call fit(net,x,y,neurons1,neurons2,sample_size,learning_rate &
+            , iteration,loss, n_feature)
     
     print *, 'Loss =',loss
 
