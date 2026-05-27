@@ -15,6 +15,7 @@ This project is a **genuine learning exercise**. I am a physics student teaching
 - All architectural decisions (module structure, derived types, subroutine design)
 - The mathematical reasoning behind each design choice
 - Debugging — I identified and reasoned through every runtime error myself
+- Added `cpu_time` timer to `main.f90` to benchmark training performance
 
 **Where Claude (Anthropic) assisted:**
 - Socratic guidance — Claude asked questions rather than giving answers, helping me derive backpropagation, forward pass equations, gradient shapes, and softmax myself
@@ -310,9 +311,9 @@ Same circle dataset, same architecture [8, 8], same hyperparameters. Verifies DG
 |--------|-------|
 | Final Loss | ~0.066–0.069 (varies by random init) |
 | Accuracy | 98% |
-| Training time (200 samples, 5000 iter) | ~0.86 seconds |
+| Training time (200 samples, 5000 iter) | 0.156 seconds (cpu_time) |
 
-**Key insight:** Results are consistent with Phase 5 — DGEMM produces mathematically identical output. The speedup from cache blocking becomes significant at MNIST scale (60,000 samples × 784 features), where naive `matmul` would reload the same data from RAM thousands of times per iteration.
+**Key insight:** Results are consistent with Phase 5 — DGEMM produces mathematically identical output. Before OpenBLAS the same run took ~0.86 seconds on a stopwatch — roughly 5x speedup even on a small dataset where cache blocking barely matters. At MNIST scale (60,000 samples × 784 features) the speedup will be significantly larger.
 
 ---
 

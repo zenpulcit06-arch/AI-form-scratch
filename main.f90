@@ -5,7 +5,7 @@ program main
     implicit none
     integer(int64) :: n_feature,sample_size, iteration,i,j,mode,N, label
     integer(int64), allocatable :: neurons(:)
-    real(real64) :: learning_rate,loss,acc
+    real(real64) :: learning_rate,loss,acc,start,finish
     real(real64), allocatable :: x(:,:), y(:,:) 
     character(len = 1000) :: filename
     type(layer), allocatable :: net(:)
@@ -75,11 +75,13 @@ program main
         end do
     end if
 
+    call cpu_time(start)
     call fit_network(net,x,y,learning_rate,iteration,sample_size,N,loss)
-
     acc = accuracy(net(N)%H,y,sample_size)
+    call cpu_time(finish)
     
     print *, 'Loss =',loss
     print *, 'Accuracy =', acc
+    print *, 'Time of execution =', finish - start,'second'
 
 end program main
