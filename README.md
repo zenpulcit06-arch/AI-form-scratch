@@ -19,7 +19,7 @@ This project is a **genuine learning exercise**. I am a physics student teaching
 **Where Claude (Anthropic) assisted:**
 - Socratic guidance — Claude asked questions rather than giving answers, helping me derive backpropagation, forward pass equations, and gradient shapes myself
 - Pointed out bugs after I had already written the code (e.g. `matmul` vs element-wise confusion, vanishing gradient diagnosis)
-- Wrote the makefile (both Phase 1 and Phase 3 versions) — I am not familiar with makefile syntax
+- Wrote the makefile — I am not familiar with makefile syntax
 - Suggested the ReLU fix when sigmoid activations caused the vanishing gradient problem
 - Explained the `spread()` intrinsic for bias broadcasting
 - Guided derivation of generalized backpropagation and He initialization for Phase 4
@@ -30,7 +30,7 @@ This project is a **genuine learning exercise**. I am a physics student teaching
 
 ## Overview
 
-This repository implements a **Non-Linear Binary Classifier** — a neural engine capable of learning non-linear decision boundaries using two approaches:
+This repository implements a **Non-Linear Classifier** — a neural engine capable of learning non-linear decision boundaries using two approaches:
 
 **Phase 1–2: Polynomial Logistic Regression**
 - Logistic Regression with Sigmoid activation
@@ -59,12 +59,10 @@ AI-from-scratch/
 ├── linear_regression/
 │   └── logistic_regression.f90   # Core math module: Fit, Standardize, Sigmoid, Accuracy
 ├── polynomial_regression/
-│   └── polynomialreg.f90         # Polynomial feature generator + legacy main program
+│   └── polynomialreg.f90         # Polynomial feature generator
 ├── neural_network/
-│   └── neural_network.f90        # Phase 3 neural network module (single hidden layer)
-├── network/
-│   └── network.f90               # Phase 4 network module: arbitrary depth, generalized backprop
-├── main.f90                      # Main program — supports N-layer network
+│   └── neural_network.f90        # Layer module (Phase 3) + Network module (Phase 4)
+├── main.f90                      # Main program — supports N-layer deep network
 ├── main_phase3.f90               # Archived Phase 3 main program
 ├── makefile                      # Cross-platform build system (written with Claude assistance)
 └── README.md
@@ -170,7 +168,7 @@ Sigmoid's derivative is at most 0.25, so gradients shrank to near-zero through m
 Adding a bias vector of size `neurons` to a matrix of size `samples × neurons` requires broadcasting. Fortran's `spread()` intrinsic replicates the vector across rows:
 
 ```fortran
-net%H = relu(matmul(X, net%W1) + spread(net%b1, 1, size(X, 1)))
+H = relu(matmul(X, W) + spread(b, 1, size(X, 1)))
 ```
 
 ---
@@ -199,7 +197,7 @@ make
 | Parameter | Value |
 |-----------|-------|
 | Hidden neurons | 8 (ReLU) |
-| Learning Rate | 0.1 |
+| Learning rate | 0.1 |
 | Iterations | 5000 |
 
 | Metric | Value |
@@ -208,7 +206,7 @@ make
 
 ### Test Case 4: Circle — Phase 4 Deep Network
 
-Same dataset, now with arbitrary depth.
+Same dataset, now with arbitrary depth. Learning rate 0.1, 5000 iterations.
 
 | Architecture | Loss |
 |---|---|
@@ -350,7 +348,7 @@ MNIST has 60,000 training samples of 28×28 pixel images (784 features). Success
 <details>
 <summary><strong>13. Fixed Weight Scaling in Deep Networks</strong></summary>
 
-**Error:** Used `0.01` fixed scaling for all layers. With 2+ hidden layers, loss stuck at 0.644 — vanishing gradients again, this time from poor initialization rather than wrong activation.
+**Error:** Used `0.01` fixed scaling for all layers. With 2+ hidden layers, loss stuck at 0.644 — vanishing gradients from poor initialization.
 
 **Fix:** Replaced with He initialization: `W * sqrt(2.0 / prev_neurons)`. Loss dropped to 0.0409 with 2 hidden layers.
 
@@ -363,7 +361,7 @@ MNIST has 60,000 training samples of 28×28 pixel images (784 features). Success
 
 **Error:** Attempted to allocate inside `do concurrent` — not permitted by most Fortran compilers.
 
-**Fix:** Replaced with a regular `do` loop for allocation, or called the dedicated `allocate_delta` subroutine.
+**Fix:** Replaced with a regular `do` loop, then refactored into the dedicated `allocate_delta` subroutine.
 
 </details>
 
