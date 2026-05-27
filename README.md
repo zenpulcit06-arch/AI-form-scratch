@@ -17,12 +17,13 @@ This project is a **genuine learning exercise**. I am a physics student teaching
 - Debugging — I identified and reasoned through every runtime error myself
 
 **Where Claude (Anthropic) assisted:**
-- Socratic guidance — Claude asked questions rather than giving answers, helping me derive backpropagation, forward pass equations, and gradient shapes myself
+- Socratic guidance — Claude asked questions rather than giving answers, helping me derive backpropagation, forward pass equations, gradient shapes, and softmax myself
 - Pointed out bugs after I had already written the code (e.g. `matmul` vs element-wise confusion, vanishing gradient diagnosis)
 - Wrote the makefile — I am not familiar with makefile syntax
 - Suggested the ReLU fix when sigmoid activations caused the vanishing gradient problem
 - Explained the `spread()` intrinsic for bias broadcasting
 - Guided derivation of generalized backpropagation and He initialization for Phase 4
+- Guided derivation of softmax and categorical cross-entropy for Phase 5
 
 **What this means:** The understanding is mine. The derivations, the dimension reasoning, the architecture choices — I worked through all of these. Claude functioned as a teacher who refused to just give answers, not as a code generator.
 
@@ -50,6 +51,14 @@ This repository implements a **Non-Linear Classifier** — a neural engine capab
 - He weight initialization to prevent vanishing gradients
 - Clean modular architecture — `layer` derived type array replaces hardcoded weights
 
+**Phase 5: Multi-Class Classification**
+- Softmax output layer replacing sigmoid
+- Categorical cross-entropy loss
+- One-hot encoding of integer labels
+- Numerically stable softmax via max subtraction trick
+- Multi-class accuracy via `maxloc`
+- Backpropagation unchanged — $\delta^{[N]} = \hat{p} - y$ holds for softmax + cross-entropy
+
 ---
 
 ## Repository Structure
@@ -61,8 +70,8 @@ AI-from-scratch/
 ├── polynomial_regression/
 │   └── polynomialreg.f90         # Polynomial feature generator
 ├── neural_network/
-│   └── neural_network.f90        # Layer module (Phase 3) + Network module (Phase 4)
-├── main.f90                      # Main program — supports N-layer deep network
+│   └── neural_network.f90        # Layer module (Phase 3) + Network module (Phase 4/5)
+├── main.f90                      # Main program — supports N-layer deep network (Phase 4/5)
 ├── main_phase3.f90               # Archived Phase 3 main program
 ├── makefile                      # Cross-platform build system (written with Claude assistance)
 └── README.md
@@ -80,7 +89,10 @@ AI-from-scratch/
 | **Generalized Backpropagation** | Delta recurrence: $\delta^{[l]} = \delta^{[l+1]} W_{l+1}^T \odot \text{ReLU}'(H_l)$ |
 | **He Initialization** | Scales weights by $\sqrt{2/n_{prev}}$ to prevent vanishing gradients in deep networks |
 | **ReLU Activation** | Hidden layers use ReLU to prevent vanishing gradients |
-| **Sigmoid Output** | Binary classification output with cross-entropy loss |
+| **Softmax Output** | Multi-class classification output with categorical cross-entropy loss |
+| **Numerically Stable Softmax** | Subtracts $\max(z)$ before exponentiation to prevent overflow |
+| **One-Hot Encoding** | Integer labels converted to one-hot vectors at runtime |
+| **Multi-Class Accuracy** | Predicted class via `maxloc` over softmax output vector |
 | **Vectorized Predictions** | Full dataset processed as single matrix operations |
 | **Z-Score Standardization** | Scales features to mean $= 0$, S.D. $= 1$ (polynomial model) |
 | **L2 Regularization** | Weight-decay penalty to combat overfitting (polynomial model) |
@@ -151,7 +163,34 @@ $$dW_l = \frac{1}{m} H_{l-1}^T \cdot \delta^{[l]}$$
 $$db_l = \frac{1}{m} \sum \delta^{[l]}$$
 $$\delta^{[l-1]} = \delta^{[l]} W_l^T \odot \text{ReLU}'(H_{l-1})$$
 
-### 6. He Weight Initialization
+### 6. Phase 5 Multi-Class Classification
+
+**Softmax** replaces sigmoid at the output layer:
+
+$$p_i = \frac{e^{z_i - \max(z)}}{\sum_j e^{z_j - \max(z)}}$$
+
+The $\max(z)$ subtraction is the numerical stability trick — it prevents `exp` overflow while leaving probabilities mathematically unchanged.
+
+**Categorical cross-entropy** replaces binary cross-entropy:
+
+$$L = -\frac{1}{m} \sum_{i=1}^{m} \sum_{k=1}^{K} y_{ik} \log(\hat{p}_{ik})$$
+
+Since $y$ is one-hot, this collapses to just $-\log(\hat{p}_{\text{true class}})$ per sample.
+
+**Key insight — backpropagation is unchanged.** The output delta is still:
+
+$$\delta^{[N]} = \hat{p} - y$$
+
+The messiness of the softmax Jacobian and the cross-entropy gradient cancel exactly — the same cancellation that makes sigmoid + binary cross-entropy give $\hat{y} - y$.
+
+**One-hot encoding** is handled at runtime in `main.f90`:
+```fortran
+read(10, *) x(i, :), label
+y(i,:) = 0.0_real64
+y(i, label + 1) = 1.0_real64
+```
+
+### 7. He Weight Initialization
 
 Initial implementation used fixed `0.01` scaling. This caused vanishing gradients in deeper networks — loss stuck at ~0.644 (random baseline). He initialization scales weights by the number of input neurons:
 
@@ -159,11 +198,11 @@ $$W \sim \text{Uniform}(-1, 1) \times \sqrt{\frac{2}{n_{prev}}}$$
 
 This keeps the variance of activations stable across layers regardless of depth.
 
-### 7. Why ReLU for Hidden Layers?
+### 8. Why ReLU for Hidden Layers?
 
 Sigmoid's derivative is at most 0.25, so gradients shrank to near-zero through multiple layers. ReLU's derivative is 1 for positive values, so gradients flow without shrinking.
 
-### 8. Bias Broadcasting with `spread()`
+### 9. Bias Broadcasting with `spread()`
 
 Adding a bias vector of size `neurons` to a matrix of size `samples × neurons` requires broadcasting. Fortran's `spread()` intrinsic replicates the vector across rows:
 
@@ -215,13 +254,23 @@ Same dataset, now with arbitrary depth. Learning rate 0.1, 5000 iterations.
 
 **Key insight:** Depth genuinely helps. Two hidden layers cut the loss by more than half compared to Phase 3. He initialization was essential — without it the 2-layer network was stuck at 0.644 (random baseline).
 
+### Test Case 5: Circle — Phase 5 Multi-Class (2 output neurons)
+
+Same circle dataset recast as 2-class problem. Learning rate 0.1, 5000 iterations, architecture [8, 8].
+
+| Metric | Value |
+|--------|-------|
+| Final Loss | 0.0582 |
+| Accuracy | 97.5% |
+
+**Key insight:** Softmax + categorical cross-entropy on a 2-class problem outperforms the binary sigmoid setup — loss dropped from 0.0409 to 0.0582 is slightly higher, but accuracy at 97.5% confirms the multi-class pipeline is working correctly and is ready for MNIST.
+
 ---
 
 ### Final Benchmark Goal: Handwritten Digit & Alphabet Recognition
 
 The ultimate target for this engine is recognizing handwritten digits (MNIST, 10 classes) and handwritten alphabets (26 classes). This will require:
 
-- **Phase 5** — Multi-class classification via Softmax output
 - **Phase 6** — CUDA/GPU acceleration for large image datasets
 - **Phase 7** — BLAS/LAPACK integration for optimized matrix operations
 
@@ -374,6 +423,35 @@ MNIST has 60,000 training samples of 28×28 pixel images (784 features). Success
 
 </details>
 
+### Phase 5 Mistakes
+
+<details>
+<summary><strong>16. `do concurrent` with Softmax</strong></summary>
+
+**Error:** Used `do concurrent` to apply softmax row by row — but softmax allocates internally, which is not permitted inside `do concurrent`.
+
+**Fix:** Replaced with a regular `do` loop.
+
+</details>
+
+<details>
+<summary><strong>17. Integer Division in Accuracy</strong></summary>
+
+**Error:** `acc = right/sample_size` — both integers, so result was always 0 for any accuracy below 100%.
+
+**Fix:** Cast to real: `acc = real(right, real64)/real(sample_size, real64)`.
+
+</details>
+
+<details>
+<summary><strong>18. `y` Allocated Before Layer Initialization</strong></summary>
+
+**Error:** `allocate(y(sample_size, size(net(N)%W,2)))` was called before `intialize_layer` — `net(N)%W` not yet allocated, causing a runtime crash.
+
+**Fix:** Moved `allocate(y...)` to after all `intialize_layer` calls.
+
+</details>
+
 ---
 
 ## Roadmap
@@ -382,9 +460,9 @@ MNIST has 60,000 training samples of 28×28 pixel images (784 features). Success
 - [x] Phase 2 — Multi-feature input, combinatorial monomial expansion, concurrent-safe recursion
 - [x] Phase 3 — Single hidden layer Neural Network with ReLU + Backpropagation
 - [x] Phase 4 — Arbitrary depth Neural Network with He initialization + Generalized Backpropagation
-- [ ] Phase 5 — Multi-class Classification (Softmax)
+- [x] Phase 5 — Multi-class Classification (Softmax + Categorical Cross-Entropy)
 - [ ] Phase 6 — CUDA/GPU acceleration for large matrices
-- [ ] Phase 7 — Link with BLAS/LAPACK for optimized matrix operations
+- [ ] Phase 7 — BLAS/LAPACK integration for optimized matrix operations
 - [ ] **Final Benchmark** — Handwritten digit recognition (MNIST) and alphabet recognition from scratch in Fortran
 
 ---

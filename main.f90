@@ -3,9 +3,9 @@ program main
     use network
 
     implicit none
-    integer(int64) :: n_feature,sample_size, iteration,i,j,mode,N
+    integer(int64) :: n_feature,sample_size, iteration,i,j,mode,N, label
     integer(int64), allocatable :: neurons(:)
-    real(real64) :: learning_rate,loss
+    real(real64) :: learning_rate,loss,acc
     real(real64), allocatable :: x(:,:), y(:,:) 
     character(len = 1000) :: filename
     type(layer), allocatable :: net(:)
@@ -30,11 +30,6 @@ program main
     
     if (allocated(neurons)) deallocate(neurons)
     allocate(neurons(N))
-    
-    if (allocated(x)) deallocate(x)
-    allocate(x(sample_size, n_feature))
-    if(allocated(y)) deallocate(y)
-    allocate(y(sample_size, 1))
 
     do i = 1, N
         print *, 'Enter no. of neurons in layer',i
@@ -47,6 +42,11 @@ program main
         call intialize_layer(net(i),neurons(i-1),neurons(i),sample_size)
     end do
 
+    if (allocated(x)) deallocate(x)
+    allocate(x(sample_size, n_feature))
+    if(allocated(y)) deallocate(y)
+    allocate(y(sample_size, size(net(N)%W,2)))
+
     mode = 0
     print *, 'Enter 1 for manual entry or 2 for CSV entry:'
     read(*,*) mode
@@ -57,7 +57,9 @@ program main
         print *, 'Reading data from ', trim(filename), '...'
         open(unit=10, file=trim(filename), status='old', action='read')
         do i = 1, sample_size
-            read(10, *) x(i, :), y(i, 1)
+            read(10, *) x(i, :), label
+            y(i,:) = 0.0_real64
+            y(i,label + 1) = 1.0_real64
         end do
         close(10)
         print *, 'Data loaded successfully.'
@@ -74,7 +76,10 @@ program main
     end if
 
     call fit_network(net,x,y,learning_rate,iteration,sample_size,N,loss)
+
+    acc = accuracy(net(N)%H,y,sample_size)
     
     print *, 'Loss =',loss
+    print *, 'Accuracy =', acc
 
 end program main

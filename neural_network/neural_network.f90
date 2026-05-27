@@ -141,8 +141,22 @@ module Network
         real(real64), allocatable :: W(:,:), b(:), H(:,:)
     end type
 
-    public intialize_layer, forward_pass_network, allocate_delta, backward_pass_network,fit_network
+    public intialize_layer, forward_pass_network, allocate_delta, backward_pass_network,fit_network, softmax, accuracy
 contains
+
+pure function softmax(z) result(r)
+    real(real64), intent(in)  :: z(:)
+    real(real64), allocatable :: r(:)
+    
+    real(real64) :: c
+    real(real64) :: temp_sum
+    
+    c = maxval(z)
+    r = exp(z - c)
+    
+    temp_sum = sum(r)
+    r = r / temp_sum
+end function softmax
 
 subroutine intialize_layer(lay, prev_neurons, current_neurons,sample_Size)
     class(layer), intent(inout) :: lay
@@ -165,15 +179,19 @@ subroutine intialize_layer(lay, prev_neurons, current_neurons,sample_Size)
     lay%H(:,:) = 0.0_real64
 end subroutine intialize_layer
 
-subroutine forward_pass_network(net,X,N)
+subroutine forward_pass_network(net,X,N,sample_size)
     class(layer), intent(inout) :: net(:)
-    integer(int64), intent(in) :: N
+    integer(int64), intent(in) :: N, sample_size
     real(real64), intent(inout):: X(:,:)
-    integer(int64) :: i
+    integer(int64) :: i,j
+    real(real64) :: temp_array(sample_size,size(net(N)%W,2))
 
     select case (N)
     case (1)
-        net(N)%H = sigmoid(matmul(X,net(N)%W) + spread(net(N)%b,1,size(X,1)))
+        temp_array = matmul(X,net(N)%W) + spread(net(N)%b,1,size(X,1))
+        do j = 1,sample_size
+        net(N)%H(j,:) = softmax(temp_array(j,:))
+        end do
     case default 
     net(1)%H = relu(matmul(X,net(1)%W) + spread(net(1)%b,1,size(X,1))) 
 
@@ -182,8 +200,12 @@ subroutine forward_pass_network(net,X,N)
             size(net(i-1)%H,1)))
     end do
     
-    net(N)%H = sigmoid(matmul(net(N-1)%H,net(N)%W) + spread(net(N)%b,1,&
-            size(net(N-1)%H,1)))
+    temp_array = matmul(net(N-1)%H,net(N)%W) + spread(net(N)%b,1,&
+            size(net(N-1)%H,1))
+
+    do i = 1,sample_size
+    net(N)%H(i,:) = softmax(temp_array(i,:))
+    end do
 
     end select
 end subroutine forward_pass_network
@@ -253,12 +275,11 @@ subroutine fit_network(net,X,y,rl,iteration,sample_size,N,loss)
     allocate(y_predicted(sample_size,size(net(N)%W,2)))
 
     do i = 1, iteration
-        call forward_pass_network(net,X,N)
+        call forward_pass_network(net,X,N,sample_size)
 
         y_predicted = net(N)%H
         
-        loss = -sum(y * log(y_predicted + 1.0e-15_real64) + (1.0_real64 - y) * &
-                log(1.0_real64 - y_predicted + 1.0e-15_real64)) / sample_size
+        loss = -sum(y * log(y_predicted + 1.0e-15_real64)) / sample_size
         
         call backward_pass_network(delta,net,X,y,y_predicted,N,sample_size,rl)
         if ( abs(last_loss - loss) .lt. 10e-8 ) then
@@ -267,5 +288,21 @@ subroutine fit_network(net,X,y,rl,iteration,sample_size,N,loss)
         last_loss = loss
     end do
 end subroutine fit_network
+
+function accuracy(y_predicted,y,sample_size) result(acc)
+    real(real64), intent(in) :: y_predicted(:,:) , y(:,:)
+    integer(int64), intent(in) :: sample_size
+    real(real64) :: acc
+    integer(int64):: i,right
+
+    right = 0
+    do i = 1,sample_size
+        if ( maxloc(y(i,:),1) .eq. maxloc(y_predicted(i,:),1) ) then
+                right = right + 1
+        end if
+    end do
+
+    acc = real(right,real64)/real(sample_size,real64)
+end function accuracy
     
 end module Network
