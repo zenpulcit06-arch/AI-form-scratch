@@ -2,8 +2,7 @@
 #  Compiler & flags
 # ─────────────────────────────────────────────
 FC     = gfortran
-FFLAGS = -O3 -Wall -fcheck=all -I$(MODDIR)
-
+FFLAGS = -O3 -Wall -fcheck=all -I$(MODDIR) 
 # ─────────────────────────────────────────────
 #  Paths
 # ─────────────────────────────────────────────
@@ -37,7 +36,7 @@ all: $(TARGET)$(EXT)
 
 $(TARGET)$(EXT): $(SOURCES)
 	$(MKDIR)
-	$(FC) $(FFLAGS) $(SOURCES) -o $(TARGET)$(EXT) -J$(MODDIR)
+	$(FC) $(FFLAGS) $(SOURCES) -o $(TARGET)$(EXT) -J$(MODDIR) -L/ucrt64/lib -lopenblas
 
 clean:
 	$(RM_BIN)

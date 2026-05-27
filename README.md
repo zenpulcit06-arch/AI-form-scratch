@@ -24,6 +24,9 @@ This project is a **genuine learning exercise**. I am a physics student teaching
 - Explained the `spread()` intrinsic for bias broadcasting
 - Guided derivation of generalized backpropagation and He initialization for Phase 4
 - Guided derivation of softmax and categorical cross-entropy for Phase 5
+- Explained cache blocking and why BLAS is faster than naive matmul for Phase 6
+- Guided the DGEMM parameter derivation — m, n, k, lda, ldb, ldc — for all forward and backward pass calls
+- Assisted with makefile changes for OpenBLAS linking
 
 **What this means:** The understanding is mine. The derivations, the dimension reasoning, the architecture choices — I worked through all of these. Claude functioned as a teacher who refused to just give answers, not as a code generator.
 
@@ -59,6 +62,12 @@ This repository implements a **Non-Linear Classifier** — a neural engine capab
 - Multi-class accuracy via `maxloc`
 - Backpropagation unchanged — $\delta^{[N]} = \hat{p} - y$ holds for softmax + cross-entropy
 
+**Phase 6: BLAS/LAPACK Integration**
+- All `matmul` calls in forward and backward pass replaced with DGEMM (OpenBLAS)
+- Cache-blocked matrix multiplication — dramatically faster at MNIST scale
+- Transpose operations handled inside DGEMM via `transa`/`transb` flags — no extra memory allocation
+- Linked via MSYS2 OpenBLAS package on Windows with gfortran
+
 ---
 
 ## Repository Structure
@@ -70,7 +79,7 @@ AI-from-scratch/
 ├── polynomial_regression/
 │   └── polynomialreg.f90         # Polynomial feature generator
 ├── neural_network/
-│   └── neural_network.f90        # Layer module (Phase 3) + Network module (Phase 4/5)
+│   └── neural_network.f90        # Layer module (Phase 3) + Network module (Phase 4/5/6)
 ├── main.f90                      # Main program — supports N-layer deep network (Phase 4/5)
 ├── main_phase3.f90               # Archived Phase 3 main program
 ├── makefile                      # Cross-platform build system (written with Claude assistance)
@@ -94,6 +103,8 @@ AI-from-scratch/
 | **One-Hot Encoding** | Integer labels converted to one-hot vectors at runtime |
 | **Multi-Class Accuracy** | Predicted class via `maxloc` over softmax output vector |
 | **Vectorized Predictions** | Full dataset processed as single matrix operations |
+| **DGEMM via OpenBLAS** | Cache-blocked matrix multiply replacing all `matmul` calls in the network module |
+| **Implicit Transpose in DGEMM** | `transpose(X)` handled via `transa='T'` — no extra allocation or copying |
 | **Z-Score Standardization** | Scales features to mean $= 0$, S.D. $= 1$ (polynomial model) |
 | **L2 Regularization** | Weight-decay penalty to combat overfitting (polynomial model) |
 | **Modular Architecture** | Math engine, feature generator, and neural network fully separated |
@@ -210,11 +221,37 @@ Adding a bias vector of size `neurons` to a matrix of size `samples × neurons` 
 H = relu(matmul(X, W) + spread(b, 1, size(X, 1)))
 ```
 
+### 10. Phase 7 — Why DGEMM is Faster Than `matmul`
+
+Fortran's built-in `matmul` computes $C = A \times B$ correctly but naively — it fetches matrix data from RAM in an order that causes repeated cache misses. For a matrix of shape $(60000 \times 784)$, the same columns of $B$ get reloaded from RAM thousands of times.
+
+DGEMM (Double-precision GEneral Matrix Multiply) from OpenBLAS solves this via **cache blocking**: instead of computing one full row of $C$ at a time, it computes small square tiles that fit entirely in CPU cache, maximizing data reuse before eviction. The mathematics is identical — only the fetch order changes.
+
+The general DGEMM operation is:
+
+$$C = \alpha \cdot \text{op}(A) \times \text{op}(B) + \beta \cdot C$$
+
+where $\text{op}(X)$ is either $X$ or $X^T$, selected via a character flag. Setting $\alpha=1$, $\beta=0$ gives plain matrix multiplication. Setting `transa='T'` handles `transpose(X)` without any extra memory allocation — DGEMM reads $A$ in transposed order internally.
+
+All `matmul` calls in `forward_pass_network` and `backward_pass_network` are replaced with DGEMM. The polynomial and logistic regression modules retain `matmul` since they will not be used at MNIST scale.
+
+**Installing OpenBLAS on Windows (MSYS2/UCRT64):**
+```bash
+pacman -S mingw-w64-ucrt-x86_64-openblas
+```
+
+**Makefile change:**
+```makefile
+$(FC) $(FFLAGS) $(SOURCES) -o $(TARGET) -J$(MODDIR) -L/ucrt64/lib -lopenblas
+```
+
+**Note on GPU acceleration (Phase 8):** NVHPC (the compiler required for OpenACC GPU support) does not support Windows natively. Phase 8 via WSL2 + NVHPC remains on the roadmap.
+
 ---
 
 ## How to Compile
 
-Ensure `gfortran` is installed (via MinGW/MSYS2 on Windows, or natively on Linux/macOS).
+Ensure `gfortran` and OpenBLAS are installed (via MSYS2/UCRT64 on Windows, or natively on Linux/macOS).
 
 ```bash
 make
@@ -265,16 +302,30 @@ Same circle dataset recast as 2-class problem. Learning rate 0.1, 5000 iteration
 
 **Key insight:** Softmax + categorical cross-entropy on a 2-class problem outperforms the binary sigmoid setup — loss dropped from 0.0409 to 0.0582 is slightly higher, but accuracy at 97.5% confirms the multi-class pipeline is working correctly and is ready for MNIST.
 
+### Test Case 6: Circle — Phase 7 BLAS/LAPACK (OpenBLAS DGEMM)
+
+Same circle dataset, same architecture [8, 8], same hyperparameters. Verifies DGEMM produces correct results.
+
+| Metric | Value |
+|--------|-------|
+| Final Loss | ~0.066–0.069 (varies by random init) |
+| Accuracy | 98% |
+| Training time (200 samples, 5000 iter) | ~0.86 seconds |
+
+**Key insight:** Results are consistent with Phase 5 — DGEMM produces mathematically identical output. The speedup from cache blocking becomes significant at MNIST scale (60,000 samples × 784 features), where naive `matmul` would reload the same data from RAM thousands of times per iteration.
+
 ---
 
 ### Final Benchmark Goal: Handwritten Digit & Alphabet Recognition
 
-The ultimate target for this engine is recognizing handwritten digits (MNIST, 10 classes) and handwritten alphabets (26 classes). This will require:
+The engine is designed to be general-purpose — any dataset that can be loaded into `x` and `y` arrays can be trained on. The final benchmark demonstrates this at real-world scale: handwritten digit recognition (MNIST, 10 classes) and handwritten alphabet recognition (26 classes).
 
-- **Phase 6** — CUDA/GPU acceleration for large image datasets
-- **Phase 7** — BLAS/LAPACK integration for optimized matrix operations
+This will require:
 
-MNIST has 60,000 training samples of 28×28 pixel images (784 features). Successfully classifying it from scratch in Fortran — no frameworks, no libraries — would be a genuine demonstration that this engine works on real-world data.
+- **Phase 7** — Large-scale data pipeline: binary file format support (IDX for MNIST), memory-efficient loading for datasets too large to fit comfortably in RAM
+- **Phase 8** — CUDA/GPU acceleration via WSL2 + NVHPC + OpenACC (deferred — NVHPC does not support Windows natively)
+
+MNIST has 60,000 training samples of 28×28 pixel images (784 features). Successfully classifying it from scratch in Fortran — no frameworks, no libraries — would be a genuine demonstration that this engine works on real-world data at scale.
 
 ---
 
@@ -452,6 +503,26 @@ MNIST has 60,000 training samples of 28×28 pixel images (784 features). Success
 
 </details>
 
+### Phase 6 Mistakes
+
+<details>
+<summary><strong>19. INTEGER(8)/INTEGER(4) Mismatch in DGEMM</strong></summary>
+
+**Error:** DGEMM expects `INTEGER(4)` (32-bit) for dimension arguments, but the codebase uses `integer(int64)` (64-bit) throughout. `size()` returns `INTEGER(4)` by default, causing mixed-type errors when combined with `int64` variables like `sample_size`.
+
+**Fix:** Wrapped all dimension arguments in every DGEMM call with `int()` to explicitly convert to `INTEGER(4)`.
+
+</details>
+
+<details>
+<summary><strong>20. Missing Matrix Arguments in DGEMM Call</strong></summary>
+
+**Error:** First attempt at DGEMM placed `lda` before the matrix `A` — confused the parameter order and skipped the actual array arguments entirely.
+
+**Fix:** Memorized the signature order: `transa, transb, m, n, k, alpha, A, lda, B, ldb, beta, C, ldc`. The matrix always comes before its leading dimension.
+
+</details>
+
 ---
 
 ## Roadmap
@@ -461,9 +532,10 @@ MNIST has 60,000 training samples of 28×28 pixel images (784 features). Success
 - [x] Phase 3 — Single hidden layer Neural Network with ReLU + Backpropagation
 - [x] Phase 4 — Arbitrary depth Neural Network with He initialization + Generalized Backpropagation
 - [x] Phase 5 — Multi-class Classification (Softmax + Categorical Cross-Entropy)
-- [ ] Phase 6 — CUDA/GPU acceleration for large matrices
-- [ ] Phase 7 — BLAS/LAPACK integration for optimized matrix operations
-- [ ] **Final Benchmark** — Handwritten digit recognition (MNIST) and alphabet recognition from scratch in Fortran
+- [x] Phase 6 — BLAS/LAPACK integration (OpenBLAS DGEMM replacing all matmul in network module)
+- [ ] Phase 7 — Large-scale data pipeline (binary file formats, memory-efficient loading)
+- [ ] Phase 8 — CUDA/GPU acceleration via WSL2 + NVHPC + OpenACC
+- [ ] **Final Benchmark** — Handwritten digit recognition (MNIST, 10-class) and alphabet recognition (26-class) as proof of a general-purpose engine
 
 ---
 

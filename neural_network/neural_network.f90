@@ -185,26 +185,56 @@ subroutine forward_pass_network(net,X,N,sample_size)
     real(real64), intent(inout):: X(:,:)
     integer(int64) :: i,j
     real(real64) :: temp_array(sample_size,size(net(N)%W,2))
+    real(real64), allocatable :: tarr(:,:)
 
     select case (N)
     case (1)
-        temp_array = matmul(X,net(N)%W) + spread(net(N)%b,1,size(X,1))
+        ! matmul(X,net(N)%W)
+        call DGEMM('N', 'N', int(sample_size), int(size(net(N)%W,2)), int(size(net(N)%W,1)), &
+           1.0d0, X, int(sample_size), net(N)%W, int(size(net(N)%W,1)), &
+           0.0d0, temp_array, int(sample_size))
+
+        temp_array = temp_array + spread(net(N)%b,1,size(X,1))
+        
         do j = 1,sample_size
-        net(N)%H(j,:) = softmax(temp_array(j,:))
+            net(N)%H(j,:) = softmax(temp_array(j,:))
         end do
-    case default 
-    net(1)%H = relu(matmul(X,net(1)%W) + spread(net(1)%b,1,size(X,1))) 
+
+    case default
+
+        if (allocated(tarr)) deallocate(tarr)
+        allocate(tarr(sample_size, size(net(1)%W,2)))
+
+        !matmul(X,net(1)%W)
+        call DGEMM('N', 'N', int(sample_size), int(size(net(1)%W,2)), int(size(net(1)%W,1)), &
+           1.0d0, X, int(sample_size), net(1)%W, int(size(net(1)%W,1)), &
+           0.0d0, tarr, int(sample_size))
+        net(1)%H = relu(tarr + spread(net(1)%b,1,size(X,1))) 
 
     do i = 2, N-1
-        net(i)%H = relu(matmul(net(i-1)%H,net(i)%W) + spread(net(i)%b,1,&
+
+        if (allocated(tarr)) deallocate(tarr)
+        allocate(tarr(sample_size, size(net(i)%W,2)))
+
+        !matmul(net(i-1)%H,net(i)%W)
+        call DGEMM('N', 'N', int(sample_size), int(size(net(i)%W,2)), int(size(net(i)%W,1)), &
+           1.0d0, net(i-1)%H, int(sample_size), net(i)%W, int(size(net(i)%W,1)), &
+           0.0d0, tarr, int(sample_size))
+        
+        net(i)%H = relu(tarr + spread(net(i)%b,1,&
             size(net(i-1)%H,1)))
     end do
-    
-    temp_array = matmul(net(N-1)%H,net(N)%W) + spread(net(N)%b,1,&
+
+    !matmul(net(N-1)%H,net(N)%W)
+    call DGEMM('N', 'N', int(sample_size), int(size(net(N)%W,2)), int(size(net(N)%W,1)), &
+           1.0d0, net(N-1)%H, int(sample_size), net(N)%W, int(size(net(N)%W,1)), &
+           0.0d0, temp_array, int(sample_size))
+
+    temp_array = temp_array + spread(net(N)%b,1,&
             size(net(N-1)%H,1))
 
     do i = 1,sample_size
-    net(N)%H(i,:) = softmax(temp_array(i,:))
+        net(N)%H(i,:) = softmax(temp_array(i,:))
     end do
 
     end select
@@ -230,10 +260,17 @@ subroutine backward_pass_network(delta,net,X,y,y_cap,N,sample_size,rl)
     integer(int64) :: i
     real(real64), intent(in) :: rl
     real(real64), allocatable :: dw(:,:),db(:)
+    
     delta(N)%d = y_cap - y
 
     do i = N -1, 1,-1 
-        delta(i)%d = matmul(delta(i+1)%d, transpose(net(i+1)%W)) * merge(1.0_real64, 0.0_real64, net(i)%H > 0.0_real64)
+
+        !matmul(delta(i+1)%d, transpose(net(i+1)%W))
+        call DGEMM('N', 'T', int(sample_size), int(size(net(i+1)%W,1)), int(size(net(i+1)%W,2)), &
+           1.0d0, delta(i+1)%d, int(sample_size), net(i+1)%W, int(size(net(i+1)%W,1)), &
+           0.0d0, delta(i)%d, int(sample_size))
+
+        delta(i)%d = delta(i)%d * merge(1.0_real64, 0.0_real64, net(i)%H > 0.0_real64)
     end do
 
     do i = 1,N
@@ -244,9 +281,18 @@ subroutine backward_pass_network(delta,net,X,y,y_cap,N,sample_size,rl)
         allocate(db(size(delta(i)%d,2)))
 
         if (i .ne. 1) then
-        dw = matmul(transpose(net(i-1)%H),delta(i)%d)/sample_size
+            !matmul(transpose(net(i-1)%H),delta(i)%d)
+            call DGEMM('T', 'N', int(size(net(i-1)%H,2)), int(size(delta(i)%d,2)), int(sample_size), &
+               1.0d0, net(i-1)%H, int(sample_size), delta(i)%d, int(sample_size), &
+               0.0d0, dw, int(size(net(i-1)%H,2)))
+
+            dw = dw/sample_size
         else
-            dw = matmul(transpose(X),delta(i)%d)/sample_size
+            !matmul(transpose(X),delta(i)%d)
+            call DGEMM('T', 'N', int(size(X,2)), int(size(delta(i)%d,2)), int(sample_size), &
+               1.0d0, X, int(sample_size), delta(i)%d, int(sample_size), &
+               0.0d0, dw, int(size(X,2)))
+            dw = dw/sample_size
         end if
         db = sum(delta(i)%d,dim =1)/sample_size 
         net(i)%W = net(i)%W - dw*rl
