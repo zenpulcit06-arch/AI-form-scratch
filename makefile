@@ -10,6 +10,7 @@ MODDIR  = modfiles
 TARGET  = ai_engine
 SOURCES = ./linear_regression/logistic_regression.f90 \
           ./neural_network/neural_network.f90 \
+          ./file_system/binfile.f90\
           ./main.f90
 
 # ─────────────────────────────────────────────

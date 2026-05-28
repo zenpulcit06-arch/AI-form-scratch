@@ -117,7 +117,7 @@ subroutine fit(net,X,y,neurons1,neurons2,sample_size,rl,iteration,loss,n_feature
         end if
         call backward_pass(net,dW2,sample_size,y_predicted,y,dW1,X,db2,db1)
         call update_weight(net,dW1,dW2,db1,db2,rl)
-        if ( abs(last_loss - loss) .lt. 10e-8 ) then
+        if ( abs(last_loss - loss) .lt. 10e-8_real64 ) then
             exit
         end if
         last_loss = loss
@@ -141,8 +141,18 @@ module Network
         real(real64), allocatable :: W(:,:), b(:), H(:,:)
     end type
 
-    public intialize_layer, forward_pass_network, allocate_delta, backward_pass_network,fit_network, softmax, accuracy
+    public intialize_layer, forward_pass_network, allocate_delta, backward_pass_network,fit_network, softmax, accuracy,resize_H
 contains
+
+subroutine resize_H(lay,sample_size)
+    class(layer) :: lay
+    integer(int64) :: sample_size
+
+    if(allocated(lay%H)) deallocate(lay%H)
+    allocate(lay%H(sample_size, size(lay%W,2)))
+    lay%H(:,:) = 0.0_real64
+
+end subroutine resize_H
 
 pure function softmax(z) result(r)
     real(real64), intent(in)  :: z(:)
@@ -252,7 +262,7 @@ subroutine allocate_delta(net,delta,sample_size,N)
     end do
 end subroutine allocate_delta
 
-subroutine backward_pass_network(delta,net,X,y,y_cap,N,sample_size,rl)
+subroutine backward_pass_network(delta,net,X,y,y_cap,N,sample_size,rl,lamda)
     class(delta_t), intent(inout) :: delta(:)
     class(layer), intent(inout) :: net(:)
     real(real64), intent(inout) :: X(:,:),y(:,:), y_cap(:,:)
@@ -260,6 +270,14 @@ subroutine backward_pass_network(delta,net,X,y,y_cap,N,sample_size,rl)
     integer(int64) :: i
     real(real64), intent(in) :: rl
     real(real64), allocatable :: dw(:,:),db(:)
+    real(real64), intent(in), optional :: lamda
+    real(real64) :: lam
+
+    if (present(lamda)) then
+        lam = lamda
+    else
+        lam = 0.0_real64
+    end if
     
     delta(N)%d = y_cap - y
 
@@ -286,13 +304,13 @@ subroutine backward_pass_network(delta,net,X,y,y_cap,N,sample_size,rl)
                1.0d0, net(i-1)%H, int(sample_size), delta(i)%d, int(sample_size), &
                0.0d0, dw, int(size(net(i-1)%H,2)))
 
-            dw = dw/sample_size
+            dw = dw/sample_size + lam*net(i)%W/sample_size
         else
             !matmul(transpose(X),delta(i)%d)
             call DGEMM('T', 'N', int(size(X,2)), int(size(delta(i)%d,2)), int(sample_size), &
                1.0d0, X, int(sample_size), delta(i)%d, int(sample_size), &
                0.0d0, dw, int(size(X,2)))
-            dw = dw/sample_size
+            dw = dw/sample_size + lam* net(i)%W/sample_size
         end if
         db = sum(delta(i)%d,dim =1)/sample_size 
         net(i)%W = net(i)%W - dw*rl
@@ -301,7 +319,7 @@ subroutine backward_pass_network(delta,net,X,y,y_cap,N,sample_size,rl)
 
 end subroutine backward_pass_network
 
-subroutine fit_network(net,X,y,rl,iteration,sample_size,N,loss)
+subroutine fit_network(net,X,y,rl,iteration,sample_size,N,loss,lamda)
     class(layer), intent(inout) :: net(:)
     class(delta_t), allocatable :: delta(:)
     real(real64), intent(inout) :: X(:,:),y(:,:),loss
@@ -309,7 +327,14 @@ subroutine fit_network(net,X,y,rl,iteration,sample_size,N,loss)
     real(real64), allocatable :: y_predicted(:,:)
     integer(int64),intent(in) :: N,iteration,sample_size
     integer(int64) :: i
-    real(real64) :: last_loss
+    real(real64) :: last_loss, lam
+    real(real64), intent(in), optional :: lamda
+
+    if (present(lamda)) then
+        lam = lamda
+    else
+        lam = 0.0_real64
+    end if
 
     last_loss = 0.0_real64
 
@@ -327,8 +352,8 @@ subroutine fit_network(net,X,y,rl,iteration,sample_size,N,loss)
         
         loss = -sum(y * log(y_predicted + 1.0e-15_real64)) / sample_size
         
-        call backward_pass_network(delta,net,X,y,y_predicted,N,sample_size,rl)
-        if ( abs(last_loss - loss) .lt. 10e-8 ) then
+        call backward_pass_network(delta,net,X,y,y_predicted,N,sample_size,rl,lam)
+        if ( abs(last_loss - loss) .lt. 10e-8_real64 ) then
             exit
         end if
         last_loss = loss

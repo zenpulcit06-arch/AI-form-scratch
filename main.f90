@@ -1,20 +1,35 @@
 program main
     use, intrinsic :: iso_fortran_env
     use network
+    use Readbin
 
     implicit none
-    integer(int64) :: n_feature,sample_size, iteration,i,j,mode,N, label
-    integer(int64), allocatable :: neurons(:)
-    real(real64) :: learning_rate,loss,acc,start,finish
-    real(real64), allocatable :: x(:,:), y(:,:) 
-    character(len = 1000) :: filename
+    integer(int64) :: sample_size, n_feature, classes, N, iteration, i
+    integer(int32) :: height, width, n_size, garbage
+    character(len = 1000) :: filename, filename2
+    real(real64) :: start, finish,loss, learning_rate, acc, lamda
+    real(real64), allocatable :: x(:,:) , y(:,:)
     type(layer), allocatable :: net(:)
+    integer(int64), allocatable :: neurons(:)
 
-    print *, "Enter no. of feature"
-    read(*,*) n_feature
+    print *, 'Enter file name:'
+    read (*,*) filename
 
-    print *, "Enter sample size"
-    read(*,*) sample_size
+    print *, 'opening file'
+    open(unit=10, file=filename, form='unformatted', access='stream', status='old')
+    print *, 'file open'
+
+    print *, 'Enter sol filename:'
+    read(*,*) filename2
+    open(unit=11, file=filename2, form='unformatted', access='stream', status='old')
+
+
+    print *,'classes size ='
+    read(*,*) classes
+
+
+    print *,'No. of layer ='
+    read(*,*) N
 
     print *, 'Enter no. of iteration'
     read(*,*) iteration
@@ -22,12 +37,28 @@ program main
     print *, 'Enter learning rate'
     read(*,*) learning_rate
 
-    print *, 'Enter no. of layers'
-    read(*,*) N
+    print *, 'Enter lamda'
+    read(*,*) lamda
+
+    call read_int32(10,garbage)
+    call read_int32(10,n_size)
+    call read_int32(10,height)
+    call read_int32(10,width)
+
+    call read_int32(11, garbage)  
+    call read_int32(11, garbage) 
+
+    sample_size = int(n_size,int64)
+    n_feature = height * width
+
+    if (allocated(y)) deallocate(y)
+    allocate(y(sample_size,classes))
+
+    if (allocated(x)) deallocate(x)
+    allocate(x(sample_size,n_feature))
 
     if (allocated(net)) deallocate(net)
     allocate(net(N))
-    
     if (allocated(neurons)) deallocate(neurons)
     allocate(neurons(N))
 
@@ -41,47 +72,65 @@ program main
     do i = 2,N
         call intialize_layer(net(i),neurons(i-1),neurons(i),sample_size)
     end do
-
-    if (allocated(x)) deallocate(x)
-    allocate(x(sample_size, n_feature))
-    if(allocated(y)) deallocate(y)
-    allocate(y(sample_size, size(net(N)%W,2)))
-
-    mode = 0
-    print *, 'Enter 1 for manual entry or 2 for CSV entry:'
-    read(*,*) mode
-
-    if (mode == 2) then
-        print *, 'Enter Filename:'
-        read(*,*) filename
-        print *, 'Reading data from ', trim(filename), '...'
-        open(unit=10, file=trim(filename), status='old', action='read')
-        do i = 1, sample_size
-            read(10, *) x(i, :), label
-            y(i,:) = 0.0_real64
-            y(i,label + 1) = 1.0_real64
-        end do
-        close(10)
-        print *, 'Data loaded successfully.'
-    else
-        do i = 1, sample_size
-            print *, '--- Sample ', i, ' ---'
-            do j = 1, n_feature
-                print *, 'Enter feature ', j, ':'
-                read(*,*) x(i, j)
-            end do
-            print *, 'Enter target label y (0 or 1):'
-            read(*,*) y(i,1)
-        end do
-    end if
-
+    
     call cpu_time(start)
-    call fit_network(net,x,y,learning_rate,iteration,sample_size,N,loss)
+
+    call read_label(11,y)
+    call read_images(10,height,width,x)
+    close(10)
+    close(11)
+
+    call fit_network(net,x,y,learning_rate,iteration,sample_size,N,loss,lamda)
     acc = accuracy(net(N)%H,y,sample_size)
     call cpu_time(finish)
     
     print *, 'Loss =',loss
     print *, 'Accuracy =', acc
     print *, 'Time of execution =', finish - start,'second'
+
+
+
+    print *, 'Enter test file name:'
+    read (*,*) filename
+
+    print *, 'opening test file'
+    open(unit=10, file=filename, form='unformatted', access='stream', status='old')
+
+    print *, 'Enter test sol filename:'
+    read(*,*) filename2
+
+    print *, 'opening test sol file'
+    open(unit=11, file=filename2, form='unformatted', access='stream', status='old')
+
+    call read_int32(10,garbage)
+    call read_int32(10,n_size)
+    call read_int32(10,height)
+    call read_int32(10,width)
+
+    call read_int32(11, garbage)  
+    call read_int32(11, garbage) 
+
+    sample_size = int(n_size,int64)
+    n_feature = height * width
+
+    if (allocated(y)) deallocate(y)
+    allocate(y(sample_size,classes))
+
+    if (allocated(x)) deallocate(x)
+    allocate(x(sample_size,n_feature))
+
+    call read_label(11,y)
+    call read_images(10,height,width,x)
+    close(10)
+    close(11)
+    
+    do i = 1, N
+        call resize_H(net(i), sample_size)
+    end do
+    
+    call forward_pass_network(net,x,N,sample_size)
+    acc = accuracy(net(N)%H,y,sample_size)
+    
+    print *, 'test Accuracy =', acc
 
 end program main
