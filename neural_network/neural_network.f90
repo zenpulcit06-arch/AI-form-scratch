@@ -117,7 +117,7 @@ subroutine fit(net,X,y,neurons1,neurons2,sample_size,rl,iteration,loss,n_feature
         end if
         call backward_pass(net,dW2,sample_size,y_predicted,y,dW1,X,db2,db1)
         call update_weight(net,dW1,dW2,db1,db2,rl)
-        if ( abs(last_loss - loss) .lt. 10e-8_real64 ) then
+        if ( abs(last_loss - loss) .lt. 1e-8_real64 ) then
             exit
         end if
         last_loss = loss
@@ -353,7 +353,7 @@ subroutine fit_network(net,X,y,rl,iteration,sample_size,N,loss,lamda)
         loss = -sum(y * log(y_predicted + 1.0e-15_real64)) / sample_size
         
         call backward_pass_network(delta,net,X,y,y_predicted,N,sample_size,rl,lam)
-        if ( abs(last_loss - loss) .lt. 10e-8_real64 ) then
+        if ( abs(last_loss - loss) .lt. 1e-8_real64 ) then
             exit
         end if
         last_loss = loss
