@@ -523,7 +523,7 @@ Original `sgd_shuffle` physically reordered all rows of `X` (60000 × 784) and `
 - [x] Phase 5 — Multi-class Classification (Softmax + Categorical Cross-Entropy)
 - [x] Phase 6 — BLAS/LAPACK integration (OpenBLAS DGEMM)
 - [x] Phase 7 — Binary data pipeline (IDX format, MNIST training and test evaluation)
-- [~] Phase 8 — Mini-batch SGD (in progress — 93.7% test accuracy, target >95%)
+- [~] Phase 8 — Mini-batch SGD (in progress — 93.7% test accuracy, target >95%) + model saving
 - [ ] Phase 9 — CUDA/GPU acceleration via WSL2 + NVHPC + OpenACC
 - [ ] **Final Benchmark** — Handwritten digit recognition (MNIST, 10-class) at >95% test accuracy
 
