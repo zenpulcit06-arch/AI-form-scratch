@@ -29,6 +29,7 @@ This project is a **genuine learning exercise**. I am a physics student teaching
 - Guided the DGEMM parameter derivation for all forward and backward pass calls
 - Guided Phase 7 binary file I/O — byte representation, base-256 arithmetic, bit manipulation, IDX format
 - Assisted with makefile changes for OpenBLAS linking
+- Guided Phase 8 mini-batch SGD — Fisher-Yates shuffle, epoch/iteration distinction, index-based batching
 
 **What this means:** The understanding is mine. The derivations, the dimension reasoning, the architecture choices — I worked through all of these. Claude functioned as a teacher who refused to just give answers, not as a code generator.
 
@@ -77,6 +78,14 @@ This repository implements a **Non-Linear Classifier** — a neural engine capab
 - L2 regularization added to deep network backward pass
 - `resize_H` subroutine for forward-pass-only inference on arbitrary sample sizes
 
+**Phase 8: Mini-Batch SGD (In Progress)**
+- Mini-batch gradient descent replacing full-batch training
+- Fisher-Yates shuffle for unbiased random batch ordering each epoch
+- Index-based batching — shuffle an integer index array, never copy the data matrix
+- Epoch/iteration distinction — training measured in epochs, not raw iterations
+- Eliminated overfitting: test accuracy matches training accuracy
+- New `sgd` module — clean separation from core network module
+
 ---
 
 ## Repository Structure
@@ -89,9 +98,11 @@ AI-from-scratch/
 │   └── polynomialreg.f90         # Polynomial feature generator
 ├── neural_network/
 │   └── neural_network.f90        # Layer module (Phase 3) + Network module (Phase 4/5/6/7)
+├── sgd/
+│   └── sgd.f90                   # Mini-batch SGD module: sgd_fit, sgd_shuffle (Phase 8)
 ├── file_system/
 │   └── binfile.f90               # Binary file I/O module: bswap32, read_int32, read_images, read_labels
-├── main.f90                      # Main program — MNIST pipeline (Phase 7)
+├── main.f90                      # Main program — MNIST pipeline (Phase 7/8)
 ├── main_phase3.f90               # Archived Phase 3 main program
 ├── main_phase4_5_6.f90           # Archived Phase 4/5/6 main program
 ├── makefile                      # Cross-platform build system (written with Claude assistance)
@@ -121,6 +132,9 @@ AI-from-scratch/
 | **Pixel Normalization** | Converts `integer(int8)` pixels to `real(real64)` in `[0.0, 1.0]` |
 | **Train/Test Evaluation** | Separate accuracy measurement on unseen test data |
 | **resize_H** | Reallocates activation arrays for inference without resetting weights |
+| **Mini-Batch SGD** | Stochastic gradient descent with configurable batch size |
+| **Fisher-Yates Shuffle** | Unbiased random permutation of sample indices each epoch |
+| **Index-Based Batching** | Shuffle integer indices only — no data matrix copying |
 
 ---
 
@@ -196,10 +210,10 @@ $$C = \alpha \cdot \text{op}(A) \times \text{op}(B) + \beta \cdot C$$
 **Big-endian vs little-endian:** MNIST stores integers most-significant-byte first (big-endian). Most modern CPUs are little-endian. `bswap32` corrects this via bit shifts:
 
 ```fortran
-p1 = iand(ishft(n, -24), 255)   ! byte 1 → position 4
-p2 = iand(ishft(n,  -8), 255)   ! byte 2 → position 3
-p3 = ishft(iand(n, 65280), 8)   ! byte 3 → position 2
-p4 = ishft(iand(n,   255), 24)  ! byte 4 → position 1
+p1 = iand(ishft(n, -24), 255)          ! byte 1 → position 4
+p2 = iand(ishft(n, -8), 65280)         ! byte 2 → position 3
+p3 = ishft(iand(n, 65280), 8)          ! byte 3 → position 2
+p4 = ishft(iand(n,   255), 24)         ! byte 4 → position 1
 r  = ior(ior(ior(p1, p2), p3), p4)
 ```
 
@@ -207,32 +221,38 @@ r  = ior(ior(ior(p1, p2), p3), p4)
 
 **Stream access:** `open(..., form='unformatted', access='stream')` reads raw bytes sequentially. File position advances automatically after each `read`.
 
+### 9. Phase 8 — Mini-Batch SGD
+
+**Why mini-batch?** Full-batch gradient descent computes the exact gradient over all samples — smooth but slow to converge and prone to getting stuck. Mini-batch uses a random subset each step, introducing controlled noise that acts as implicit regularization.
+
+**The epoch/iteration distinction:** With batch size $B$ and dataset size $m$, one epoch = $\lfloor m/B \rfloor$ weight updates. Training is now measured in epochs (full passes through the data), not raw iterations.
+
+**Fisher-Yates shuffle:** At the start of each epoch, a random permutation of indices $1$ to $m$ is generated in $O(m)$ time with guaranteed uniformity — every permutation equally likely.
+
+**Index-based batching:** Instead of physically shuffling the data matrices, only an integer index array is shuffled. Batch $k$ is then accessed as `X(idx(start:end), :)`. This avoids copying a $60000 \times 784$ matrix every epoch — a 3.4x speedup in practice.
+
+**Effect on generalization:** Mini-batch noise prevents overfitting. Phase 7 full-batch achieved 100% training accuracy but only 62.5% test accuracy. Phase 8 mini-batch achieves 93.7% training and 93.7% test accuracy — the generalization gap is eliminated.
+
 ---
 
 ## Limitations
 
 ### 1. No Validation Set
-The engine currently evaluates on training accuracy and test accuracy only. There is no validation split for hyperparameter tuning. Tuning lambda or iteration count by watching test accuracy means the test set is no longer a clean holdout — reported test accuracy becomes optimistically biased. A proper pipeline would reserve 10,000 samples from the training set as a validation set and never touch the test set until the final evaluation.
+The engine currently evaluates on training accuracy and test accuracy only. There is no validation split for hyperparameter tuning. A proper pipeline would reserve samples from the training set as a validation set and never touch the test set until the final evaluation.
 
-### 2. Overfitting on MNIST
-Current test accuracy on MNIST is ~68% with architecture `[128, 10]` at 1000 iterations. Training accuracy reaches 100%, indicating significant overfitting. The generalization gap is large. Stronger L2 regularization, dropout, or batch normalization would help — none of these are currently implemented.
+### 2. No Dropout
+Dropout — randomly zeroing neurons during training — is one of the most effective regularization techniques for neural networks. It is not implemented.
 
-### 3. No Dropout
-Dropout — randomly zeroing neurons during training — is one of the most effective regularization techniques for neural networks. It is not implemented. Adding it would require a mask array per layer during the forward pass and correct scaling during inference.
+### 3. No Adaptive Learning Rate
+The learning rate is fixed throughout training. Methods like Adam, RMSProp, or even simple learning rate decay would allow faster early progress and finer convergence later.
 
-### 4. No Mini-Batch Gradient Descent
-The engine uses full-batch gradient descent — every weight update processes all 60,000 samples at once. Mini-batch SGD (processing 32–256 samples per update) would give noisier but faster-converging gradients, better generalization, and dramatically lower memory usage at larger scales.
+### 4. No Model Saving
+Trained weights are lost when the program exits. There is no mechanism to serialize weights to disk and reload them. Every run trains from scratch.
 
-### 5. No Adaptive Learning Rate
-The learning rate is fixed throughout training. Methods like Adam, RMSProp, or even simple learning rate decay would allow faster early progress and finer convergence later. Fixed learning rate forces a tradeoff — high enough to learn, low enough not to diverge.
+### 5. Windows-Only GPU Path Blocked
+Phase 9 (GPU acceleration via OpenACC) requires NVHPC, which does not support Windows natively. This requires WSL2 — still on the roadmap.
 
-### 6. No Model Saving
-Trained weights are lost when the program exits. There is no mechanism to serialize weights to disk and reload them. Every run trains from scratch. For MNIST this means 25+ seconds per experiment.
-
-### 7. Windows-Only GPU Path Blocked
-Phase 8 (GPU acceleration via OpenACC) requires NVHPC, which does not support Windows natively. This requires WSL2 — still on the roadmap.
-
-### 8. No Batch Normalization
+### 6. No Batch Normalization
 Batch normalization stabilizes training in deep networks by normalizing layer inputs. Without it, deeper architectures (4+ layers) may train poorly even with He initialization.
 
 ---
@@ -288,7 +308,18 @@ Architecture `[128, 10]`, learning rate 0.1, lambda 0.001, 1000 iterations.
 | Test Accuracy | 62.5% |
 | Training Time | 25.8 seconds |
 
-**Key insight:** Large generalization gap (100% train vs 62.5% test) indicates overfitting. The engine is correctly reading and training on real MNIST data — the gap is a tuning problem, not a pipeline problem. Stronger regularization, mini-batch training, and a validation split are the next steps.
+**Key insight:** Large generalization gap (100% train vs 62.5% test) indicates overfitting.
+
+### Test Case 8: MNIST — Phase 8 Mini-Batch SGD (Checkpoint 1)
+
+Architecture `[128, 10]`, learning rate 0.01, lambda 0.01, batch size 256.
+
+| Epochs | Train Accuracy | Test Accuracy | Training Time |
+|--------|---------------|---------------|---------------|
+| 10 | 89.7% | 90.3% | 44s |
+| 50 | 93.7% | 93.7% | 480s |
+
+**Key insight:** Generalization gap eliminated. Phase 7 had a 37.5% gap (100% train vs 62.5% test). Phase 8 has a 0% gap at 50 epochs — mini-batch noise acts as implicit regularization. Target is >95% test accuracy.
 
 ---
 
@@ -431,7 +462,7 @@ Memorized the signature order: `transa, transb, m, n, k, alpha, A, lda, B, ldb, 
 
 <details>
 <summary><strong>21. `bswap32` — Mask and Shift Swapped</strong></summary>
-For left-shift pieces, the correct order is `ishft(iand(n, mask), shift)` — isolate first, then shift. Initially wrote `ishft(n, mask)` with the mask in the shift position.
+For left-shift pieces, the correct order is `ishft(iand(n, mask), shift)` — isolate first, then shift.
 </details>
 
 <details>
@@ -441,22 +472,44 @@ Used `int8` for `p1`–`p4` in `bswap32` — truncated bits above position 8. Fi
 
 <details>
 <summary><strong>23. Reading Header Before Data</strong></summary>
-Called `read_label` before reading the label file header — first bytes read as labels were actually the magic number. Added two `read_int32` calls to discard the label file header.
+Called `read_label` before reading the label file header. Added two `read_int32` calls to discard the label file header.
 </details>
 
 <details>
 <summary><strong>24. `resize_H` Using `size(lay%H, 2)` After Deallocation</strong></summary>
-Called `size(lay%H, 2)` after `deallocate(lay%H)` — undefined behavior. Fixed to `size(lay%W, 2)` which is always allocated.
+Called `size(lay%H, 2)` after `deallocate(lay%H)` — undefined behavior. Fixed to `size(lay%W, 2)`.
 </details>
 
 <details>
 <summary><strong>25. `10e-8` vs `1e-8` in Early Stopping</strong></summary>
-`10e-8` = 10 × 10⁻⁸ = 10⁻⁷. Intended `1e-8`. Ten times too loose, causing early stopping to trigger prematurely.
+`10e-8` = 10 × 10⁻⁸ = 10⁻⁷. Intended `1e-8`. Ten times too loose, causing premature early stopping.
 </details>
 
 <details>
 <summary><strong>26. Early Stopping Incompatible with Full-Batch Gradient Descent</strong></summary>
-With full-batch gradient descent on 60,000 samples, the loss decreases in very smooth, tiny steps each iteration. The early stopping condition `abs(last_loss - loss) < 1e-8` triggered prematurely — after ~15,000 iterations instead of running to true convergence. The loss was still dropping significantly but each individual step was below the threshold. Fix: removed early stopping entirely from `fit_network`. Training now runs for exactly the number of iterations specified. Early stopping makes sense with mini-batch SGD where loss is noisy — not with full-batch where every step is smooth and consistent.
+With full-batch on 60,000 samples, loss decreases in very smooth tiny steps. Early stopping triggered after ~15,000 iterations instead of true convergence. Removed early stopping from `fit_network` entirely.
+</details>
+
+### Phase 8 Mistakes
+
+<details>
+<summary><strong>27. `bswap32` p2 Missing Left Shift</strong></summary>
+`p2 = iand(ishft(n,-8), 255)` extracted byte 2 correctly but never shifted it left to position 3. Result: byte 2 landed at position 1 instead of position 3, giving wrong values. Fixed by using the correct mask `65280` after the right shift: `p2 = iand(ishft(n,-8), 65280)`.
+</details>
+
+<details>
+<summary><strong>28. `no_batch = 0` — Sample Size Was 96</strong></summary>
+`bswap32` bug caused `n_size` to read as 96 instead of 60,000. Since 96 < 256 (batch size), integer division gave `no_batch = 0` and the batch loop never executed. Loss was NaN because `loss_accu / 0` is undefined. Root cause was the `bswap32` bug above.
+</details>
+
+<details>
+<summary><strong>29. Learning Rate Too High for Mini-Batch</strong></summary>
+Phase 7 used learning rate 0.1 with ~1000 weight updates total. Phase 8 with 10 epochs × 234 batches = 2340 updates at the same rate caused numerical explosion (NaN loss from first epoch). Fixed by reducing learning rate to 0.01.
+</details>
+
+<details>
+<summary><strong>30. Shuffling Full Data Matrix Each Epoch</strong></summary>
+Original `sgd_shuffle` physically reordered all rows of `X` (60000 × 784) and `y` each epoch — two full matrix copies. Replaced with index-based shuffle: only a 60000-element integer array is shuffled, and batches are sliced as `X(idx(start:end), :)`. 3.4x speedup.
 </details>
 
 ---
@@ -470,7 +523,7 @@ With full-batch gradient descent on 60,000 samples, the loss decreases in very s
 - [x] Phase 5 — Multi-class Classification (Softmax + Categorical Cross-Entropy)
 - [x] Phase 6 — BLAS/LAPACK integration (OpenBLAS DGEMM)
 - [x] Phase 7 — Binary data pipeline (IDX format, MNIST training and test evaluation)
-- [ ] Phase 8 — Mini-batch gradient descent + validation split + model saving
+- [~] Phase 8 — Mini-batch SGD (in progress — 93.7% test accuracy, target >95%)
 - [ ] Phase 9 — CUDA/GPU acceleration via WSL2 + NVHPC + OpenACC
 - [ ] **Final Benchmark** — Handwritten digit recognition (MNIST, 10-class) at >95% test accuracy
 

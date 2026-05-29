@@ -2,9 +2,10 @@ program main
     use, intrinsic :: iso_fortran_env
     use network
     use Readbin
+    use sgd
 
     implicit none
-    integer(int64) :: sample_size, n_feature, classes, N, iteration, i
+    integer(int64) :: sample_size, n_feature, classes, N, n_epoch, i, batch_size
     integer(int32) :: height, width, n_size, garbage
     character(len = 1000) :: filename, filename2
     real(real64) :: start, finish,loss, learning_rate, acc, lamda
@@ -31,8 +32,11 @@ program main
     print *,'No. of layer ='
     read(*,*) N
 
-    print *, 'Enter no. of iteration'
-    read(*,*) iteration
+    print *, 'Enter no. of epochs'
+    read(*,*) n_epoch
+
+    print *, 'Enter no. of batch size'
+    read(*,*) batch_size
 
     print *, 'Enter learning rate'
     read(*,*) learning_rate
@@ -80,7 +84,8 @@ program main
     close(10)
     close(11)
 
-    call fit_network(net,x,y,learning_rate,iteration,sample_size,N,loss,lamda)
+    call sgd_fit(net,x,y,learning_rate,n_epoch,sample_size,N,loss,lamda,batch_size)
+    call forward_pass_network(net,x,N,sample_size)
     acc = accuracy(net(N)%H,y,sample_size)
     call cpu_time(finish)
     

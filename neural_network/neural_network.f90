@@ -133,7 +133,7 @@ module Network
     implicit none
     private
 
-    type :: delta_t
+    type, public :: delta_t
     real(real64), allocatable :: d(:,:)
     end type
 

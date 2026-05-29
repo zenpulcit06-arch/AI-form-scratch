@@ -5,15 +5,18 @@ module Readbin
     public bswap32, read_int32, read_images, read_label
 contains
     function bswap32(n) result(r)
+
+        implicit none
         integer(int32), intent(in) :: n
         integer(int32) :: r
-        integer(int32) :: p1,p2,p3,p4
+        integer(int32) :: p1, p2, p3, p4
+    
         p1 = iand(ishft(n, -24), 255)
-        p2 = iand(ishft(n,-8),255)
-        p3 = ishft(iand(n, 65280),8)
+        p2 = iand(ishft(n, -8), 65280)
+        p3 = ishft(iand(n, 65280), 8)
         p4 = ishft(iand(n, 255), 24)
 
-        r = ior( ior( ior( p1, p2 ), p3), p4 )
+        r = ior(ior(ior(p1, p2), p3), p4)
     end function bswap32
 
     subroutine read_int32(unit, value)
