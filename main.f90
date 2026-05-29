@@ -3,16 +3,26 @@ program main
     use network
     use Readbin
     use sgd
+    use SaveingData
 
     implicit none
-    integer(int64) :: sample_size, n_feature, classes, N, n_epoch, i, batch_size
+    integer(int64) :: sample_size, n_feature, classes, N, n_epoch, i, batch_size,mode
     integer(int32) :: height, width, n_size, garbage
-    character(len = 1000) :: filename, filename2
+    character(len = 1000) :: filename, filename2, savefile_name
     real(real64) :: start, finish,loss, learning_rate, acc, lamda
     real(real64), allocatable :: x(:,:) , y(:,:)
     type(layer), allocatable :: net(:)
     integer(int64), allocatable :: neurons(:)
 
+    mode = 0
+    print *, 'Enter 1 to load model and anything else integer to train model'
+    read (*,*) mode
+
+    if ( mode .eq. 1 ) then
+        print *, 'Enter file name'
+        read(*,*) savefile_name
+        call load_network(net,savefile_name,N)
+    else
     print *, 'Enter file name:'
     read (*,*) filename
 
@@ -92,6 +102,7 @@ program main
     print *, 'Loss =',loss
     print *, 'Accuracy =', acc
     print *, 'Time of execution =', finish - start,'second'
+    end if
 
 
 
@@ -118,6 +129,8 @@ program main
     sample_size = int(n_size,int64)
     n_feature = height * width
 
+    classes = size(net(N)%W,2)
+
     if (allocated(y)) deallocate(y)
     allocate(y(sample_size,classes))
 
@@ -137,5 +150,15 @@ program main
     acc = accuracy(net(N)%H,y,sample_size)
     
     print *, 'test Accuracy =', acc
+
+    mode = 0
+    print *,'Enter 1 to save file and any other integer to continue'
+    read(*,*) mode
+
+    if ( mode .eq. 1 ) then
+        print *,'Enter file name'
+        read(*,*) savefile_name
+        call save_network(net,savefile_name)
+    end if
 
 end program main

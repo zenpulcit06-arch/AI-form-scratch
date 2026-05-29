@@ -30,6 +30,7 @@ This project is a **genuine learning exercise**. I am a physics student teaching
 - Guided Phase 7 binary file I/O — byte representation, base-256 arithmetic, bit manipulation, IDX format
 - Assisted with makefile changes for OpenBLAS linking
 - Guided Phase 8 mini-batch SGD — Fisher-Yates shuffle, epoch/iteration distinction, index-based batching
+- Guided Phase 8 model saving — binary serialization of weights, int32/int64 type consistency
 
 **What this means:** The understanding is mine. The derivations, the dimension reasoning, the architecture choices — I worked through all of these. Claude functioned as a teacher who refused to just give answers, not as a code generator.
 
@@ -78,13 +79,16 @@ This repository implements a **Non-Linear Classifier** — a neural engine capab
 - L2 regularization added to deep network backward pass
 - `resize_H` subroutine for forward-pass-only inference on arbitrary sample sizes
 
-**Phase 8: Mini-Batch SGD (In Progress)**
+**Phase 8: Mini-Batch SGD + Model Saving (In Progress)**
 - Mini-batch gradient descent replacing full-batch training
 - Fisher-Yates shuffle for unbiased random batch ordering each epoch
 - Index-based batching — shuffle an integer index array, never copy the data matrix
 - Epoch/iteration distinction — training measured in epochs, not raw iterations
 - Eliminated overfitting: test accuracy matches training accuracy
 - New `sgd` module — clean separation from core network module
+- Model saving and loading — binary serialization of weights and biases to disk
+- New `SaveingData` module — `save_network` and `load_network` subroutines
+- Classes derived from loaded network — no need to re-enter architecture on load
 
 ---
 
@@ -100,6 +104,8 @@ AI-from-scratch/
 │   └── neural_network.f90        # Layer module (Phase 3) + Network module (Phase 4/5/6/7)
 ├── sgd/
 │   └── sgd.f90                   # Mini-batch SGD module: sgd_fit, sgd_shuffle (Phase 8)
+├── saving_file/
+│   └── save_file.f90             # Model serialization: save_network, load_network (Phase 8)
 ├── file_system/
 │   └── binfile.f90               # Binary file I/O module: bswap32, read_int32, read_images, read_labels
 ├── main.f90                      # Main program — MNIST pipeline (Phase 7/8)
@@ -135,6 +141,8 @@ AI-from-scratch/
 | **Mini-Batch SGD** | Stochastic gradient descent with configurable batch size |
 | **Fisher-Yates Shuffle** | Unbiased random permutation of sample indices each epoch |
 | **Index-Based Batching** | Shuffle integer indices only — no data matrix copying |
+| **Model Saving** | Binary serialization of all layer weights and biases to disk |
+| **Model Loading** | Restore full network from file — architecture inferred from saved dimensions |
 
 ---
 
@@ -233,6 +241,23 @@ r  = ior(ior(ior(p1, p2), p3), p4)
 
 **Effect on generalization:** Mini-batch noise prevents overfitting. Phase 7 full-batch achieved 100% training accuracy but only 62.5% test accuracy. Phase 8 mini-batch achieves 93.7% training and 93.7% test accuracy — the generalization gap is eliminated.
 
+### 10. Phase 8 — Model Saving
+
+**File format:** Binary stream — same format used for MNIST. Compact and fast. The save file stores the full network state:
+
+```
+N (int64)                          — number of layers
+for each layer:
+    current_neurons (int64)        — size of b, cols of W
+    prev_neurons (int64)           — rows of W
+    W (real64 array)               — weight matrix
+    b (real64 array)               — bias vector
+```
+
+**Architecture inference on load:** When loading, `current_neurons` and `prev_neurons` are read from the file — no need to re-enter the architecture. `classes` is derived as `size(net(N)%W, 2)` from the loaded network.
+
+**Type consistency:** All integer metadata written as `int64` explicitly using `int(..., int64)` — mixing `int32` from `size()` with `int64` reads causes silent corruption (wrong values, not a crash).
+
 ---
 
 ## Limitations
@@ -246,13 +271,10 @@ Dropout — randomly zeroing neurons during training — is one of the most effe
 ### 3. No Adaptive Learning Rate
 The learning rate is fixed throughout training. Methods like Adam, RMSProp, or even simple learning rate decay would allow faster early progress and finer convergence later.
 
-### 4. No Model Saving
-Trained weights are lost when the program exits. There is no mechanism to serialize weights to disk and reload them. Every run trains from scratch.
-
-### 5. Windows-Only GPU Path Blocked
+### 4. Windows-Only GPU Path Blocked
 Phase 9 (GPU acceleration via OpenACC) requires NVHPC, which does not support Windows natively. This requires WSL2 — still on the roadmap.
 
-### 6. No Batch Normalization
+### 5. No Batch Normalization
 Batch normalization stabilizes training in deep networks by normalizing layer inputs. Without it, deeper architectures (4+ layers) may train poorly even with He initialization.
 
 ---
@@ -320,6 +342,17 @@ Architecture `[128, 10]`, learning rate 0.01, lambda 0.01, batch size 256.
 | 50 | 93.7% | 93.7% | 480s |
 
 **Key insight:** Generalization gap eliminated. Phase 7 had a 37.5% gap (100% train vs 62.5% test). Phase 8 has a 0% gap at 50 epochs — mini-batch noise acts as implicit regularization. Target is >95% test accuracy.
+
+### Test Case 9: MNIST — Phase 8 Model Save/Load
+
+Architecture `[128, 10]`, learning rate 0.01, lambda 0.01, batch size 256, 5 epochs.
+
+| Metric | Value |
+|--------|-------|
+| Test Accuracy (trained) | 87.9% |
+| Test Accuracy (loaded from file) | 87.9% |
+
+**Key insight:** Save and load reproduce identical results — weights are serialized and restored correctly.
 
 ---
 
@@ -494,22 +527,32 @@ With full-batch on 60,000 samples, loss decreases in very smooth tiny steps. Ear
 
 <details>
 <summary><strong>27. `bswap32` p2 Missing Left Shift</strong></summary>
-`p2 = iand(ishft(n,-8), 255)` extracted byte 2 correctly but never shifted it left to position 3. Result: byte 2 landed at position 1 instead of position 3, giving wrong values. Fixed by using the correct mask `65280` after the right shift: `p2 = iand(ishft(n,-8), 65280)`.
+`p2 = iand(ishft(n,-8), 255)` extracted byte 2 correctly but never shifted it left to position 3. Result: byte 2 landed at position 1 instead of position 3, giving wrong header values. Fixed: `p2 = iand(ishft(n,-8), 65280)`.
 </details>
 
 <details>
 <summary><strong>28. `no_batch = 0` — Sample Size Was 96</strong></summary>
-`bswap32` bug caused `n_size` to read as 96 instead of 60,000. Since 96 < 256 (batch size), integer division gave `no_batch = 0` and the batch loop never executed. Loss was NaN because `loss_accu / 0` is undefined. Root cause was the `bswap32` bug above.
+`bswap32` bug caused `n_size` to read as 96 instead of 60,000. Since 96 < 256 (batch size), integer division gave `no_batch = 0` and the batch loop never executed. Loss was NaN because `loss_accu / 0` is undefined.
 </details>
 
 <details>
 <summary><strong>29. Learning Rate Too High for Mini-Batch</strong></summary>
-Phase 7 used learning rate 0.1 with ~1000 weight updates total. Phase 8 with 10 epochs × 234 batches = 2340 updates at the same rate caused numerical explosion (NaN loss from first epoch). Fixed by reducing learning rate to 0.01.
+Phase 7 used learning rate 0.1 with ~1000 weight updates total. Phase 8 with 10 epochs × 234 batches = 2340 updates at the same rate caused numerical explosion (NaN from epoch 1). Fixed by reducing learning rate to 0.01.
 </details>
 
 <details>
 <summary><strong>30. Shuffling Full Data Matrix Each Epoch</strong></summary>
-Original `sgd_shuffle` physically reordered all rows of `X` (60000 × 784) and `y` each epoch — two full matrix copies. Replaced with index-based shuffle: only a 60000-element integer array is shuffled, and batches are sliced as `X(idx(start:end), :)`. 3.4x speedup.
+Original `sgd_shuffle` physically reordered all rows of `X` (60000 × 784) and `y` each epoch. Replaced with index-based shuffle — only a 60000-element integer array is shuffled. 3.4x speedup.
+</details>
+
+<details>
+<summary><strong>31. `int32`/`int64` Mismatch in `save_network` — N Written as Wrong Type</strong></summary>
+`write(10) size(net)` wrote `N` as `int32` (4 bytes) but `load_network` read it into an `int64` variable (8 bytes). The read consumed 8 bytes when only 4 were written, picking up garbage from the next field. Result: `N = 549755813890` instead of 2, causing an immediate allocation crash. Fixed: `write(10) int(size(net), int64)`.
+</details>
+
+<details>
+<summary><strong>32. `int32`/`int64` Mismatch in `save_network` — Layer Dimensions Written as Wrong Type</strong></summary>
+Same problem repeated for `size(net(i)%b)` and `size(net(i)%W,1)` — both returned `int32` by default. `load_network` read them as `int64`, producing garbage dimension values and an integer overflow crash during allocation. Fixed: `int(size(net(i)%b), int64)` and `int(size(net(i)%W,1), int64)`. Rule: always explicitly cast metadata to `int64` when writing binary files read back into `int64` variables.
 </details>
 
 ---
@@ -523,7 +566,7 @@ Original `sgd_shuffle` physically reordered all rows of `X` (60000 × 784) and `
 - [x] Phase 5 — Multi-class Classification (Softmax + Categorical Cross-Entropy)
 - [x] Phase 6 — BLAS/LAPACK integration (OpenBLAS DGEMM)
 - [x] Phase 7 — Binary data pipeline (IDX format, MNIST training and test evaluation)
-- [~] Phase 8 — Mini-batch SGD (in progress — 93.7% test accuracy, target >95%) + model saving
+- [~] Phase 8 — Mini-batch SGD + model saving (in progress — 93.7% test accuracy, target >95%)
 - [ ] Phase 9 — CUDA/GPU acceleration via WSL2 + NVHPC + OpenACC
 - [ ] **Final Benchmark** — Handwritten digit recognition (MNIST, 10-class) at >95% test accuracy
 

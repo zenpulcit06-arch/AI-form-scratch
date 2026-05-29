@@ -12,6 +12,7 @@ SOURCES = ./linear_regression/logistic_regression.f90 \
           ./neural_network/neural_network.f90 \
           ./file_system/binfile.f90\
           ./sgd/sgd.f90\
+          ./saving_file/save_file.f90\
           ./main.f90
 
 # ─────────────────────────────────────────────
