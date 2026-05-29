@@ -79,7 +79,7 @@ This repository implements a **Non-Linear Classifier** — a neural engine capab
 - L2 regularization added to deep network backward pass
 - `resize_H` subroutine for forward-pass-only inference on arbitrary sample sizes
 
-**Phase 8: Mini-Batch SGD + Model Saving (In Progress)**
+**Phase 8: Mini-Batch SGD + Model Saving**
 - Mini-batch gradient descent replacing full-batch training
 - Fisher-Yates shuffle for unbiased random batch ordering each epoch
 - Index-based batching — shuffle an integer index array, never copy the data matrix
@@ -89,6 +89,7 @@ This repository implements a **Non-Linear Classifier** — a neural engine capab
 - Model saving and loading — binary serialization of weights and biases to disk
 - New `SaveingData` module — `save_network` and `load_network` subroutines
 - Classes derived from loaded network — no need to re-enter architecture on load
+- **Target achieved: 98% test accuracy on MNIST**
 
 ---
 
@@ -239,7 +240,7 @@ r  = ior(ior(ior(p1, p2), p3), p4)
 
 **Index-based batching:** Instead of physically shuffling the data matrices, only an integer index array is shuffled. Batch $k$ is then accessed as `X(idx(start:end), :)`. This avoids copying a $60000 \times 784$ matrix every epoch — a 3.4x speedup in practice.
 
-**Effect on generalization:** Mini-batch noise prevents overfitting. Phase 7 full-batch achieved 100% training accuracy but only 62.5% test accuracy. Phase 8 mini-batch achieves 93.7% training and 93.7% test accuracy — the generalization gap is eliminated.
+**Effect on generalization:** Mini-batch noise prevents overfitting. Phase 7 full-batch achieved 100% training accuracy but only 62.5% test accuracy. Phase 8 mini-batch achieves 98% test accuracy with architecture `[512, 256, 128, 10]` — the generalization gap is eliminated.
 
 ### 10. Phase 8 — Model Saving
 
@@ -276,6 +277,9 @@ Phase 9 (GPU acceleration via OpenACC) requires NVHPC, which does not support Wi
 
 ### 5. No Batch Normalization
 Batch normalization stabilizes training in deep networks by normalizing layer inputs. Without it, deeper architectures (4+ layers) may train poorly even with He initialization.
+
+### 6. Training Time at Scale
+Architecture `[512, 256, 128, 10]` at 1000 epochs takes ~4.6 hours on CPU. GPU acceleration (Phase 9) is the next step to make deep experiments practical.
 
 ---
 
@@ -332,7 +336,7 @@ Architecture `[128, 10]`, learning rate 0.1, lambda 0.001, 1000 iterations.
 
 **Key insight:** Large generalization gap (100% train vs 62.5% test) indicates overfitting.
 
-### Test Case 8: MNIST — Phase 8 Mini-Batch SGD (Checkpoint 1)
+### Test Case 8: MNIST — Phase 8 Mini-Batch SGD
 
 Architecture `[128, 10]`, learning rate 0.01, lambda 0.01, batch size 256.
 
@@ -341,11 +345,24 @@ Architecture `[128, 10]`, learning rate 0.01, lambda 0.01, batch size 256.
 | 10 | 89.7% | 90.3% | 44s |
 | 50 | 93.7% | 93.7% | 480s |
 
-**Key insight:** Generalization gap eliminated. Phase 7 had a 37.5% gap (100% train vs 62.5% test). Phase 8 has a 0% gap at 50 epochs — mini-batch noise acts as implicit regularization. Target is >95% test accuracy.
+**Key insight:** Generalization gap eliminated. Phase 7 had a 37.5% gap (100% train vs 62.5% test). Phase 8 has a 0% gap — mini-batch noise acts as implicit regularization.
 
-### Test Case 9: MNIST — Phase 8 Model Save/Load
+### Test Case 9: MNIST — Phase 8 Deep Architecture
 
-Architecture `[128, 10]`, learning rate 0.01, lambda 0.01, batch size 256, 5 epochs.
+Architecture `[512, 256, 128, 10]`, learning rate 0.01, lambda 0.01, batch size 256, 1000 epochs.
+
+| Metric | Value |
+|--------|-------|
+| Final Loss | 6.02 × 10⁻⁴ |
+| Training Accuracy | 100% |
+| Test Accuracy | **98.0%** |
+| Training Time | 16681s (~4.6 hours) |
+
+**Key insight:** Target of >95% test accuracy achieved. Deeper architecture with more epochs converges to 98% — but training time highlights the need for GPU acceleration in Phase 9.
+
+### Test Case 10: MNIST — Phase 8 Model Save/Load
+
+Architecture `[128, 10]`, 5 epochs.
 
 | Metric | Value |
 |--------|-------|
@@ -547,7 +564,7 @@ Original `sgd_shuffle` physically reordered all rows of `X` (60000 × 784) and `
 
 <details>
 <summary><strong>31. `int32`/`int64` Mismatch in `save_network` — N Written as Wrong Type</strong></summary>
-`write(10) size(net)` wrote `N` as `int32` (4 bytes) but `load_network` read it into an `int64` variable (8 bytes). The read consumed 8 bytes when only 4 were written, picking up garbage from the next field. Result: `N = 549755813890` instead of 2, causing an immediate allocation crash. Fixed: `write(10) int(size(net), int64)`.
+`write(10) size(net)` wrote `N` as `int32` (4 bytes) but `load_network` read it into an `int64` variable (8 bytes). The read consumed 8 bytes when only 4 were written, picking up garbage. Result: `N = 549755813890` instead of 2, causing an immediate allocation crash. Fixed: `write(10) int(size(net), int64)`.
 </details>
 
 <details>
@@ -566,9 +583,9 @@ Same problem repeated for `size(net(i)%b)` and `size(net(i)%W,1)` — both retur
 - [x] Phase 5 — Multi-class Classification (Softmax + Categorical Cross-Entropy)
 - [x] Phase 6 — BLAS/LAPACK integration (OpenBLAS DGEMM)
 - [x] Phase 7 — Binary data pipeline (IDX format, MNIST training and test evaluation)
-- [~] Phase 8 — Mini-batch SGD + model saving (in progress — 93.7% test accuracy, target >95%)
+- [x] Phase 8 — Mini-batch SGD + model saving (98% test accuracy achieved)
 - [ ] Phase 9 — CUDA/GPU acceleration via WSL2 + NVHPC + OpenACC
-- [ ] **Final Benchmark** — Handwritten digit recognition (MNIST, 10-class) at >95% test accuracy
+- [ ] **Final Benchmark** — Sub-60s training at >98% test accuracy on GPU
 
 ---
 
