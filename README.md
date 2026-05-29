@@ -454,6 +454,11 @@ Called `size(lay%H, 2)` after `deallocate(lay%H)` — undefined behavior. Fixed 
 `10e-8` = 10 × 10⁻⁸ = 10⁻⁷. Intended `1e-8`. Ten times too loose, causing early stopping to trigger prematurely.
 </details>
 
+<details>
+<summary><strong>26. Early Stopping Incompatible with Full-Batch Gradient Descent</strong></summary>
+With full-batch gradient descent on 60,000 samples, the loss decreases in very smooth, tiny steps each iteration. The early stopping condition `abs(last_loss - loss) < 1e-8` triggered prematurely — after ~15,000 iterations instead of running to true convergence. The loss was still dropping significantly but each individual step was below the threshold. Fix: removed early stopping entirely from `fit_network`. Training now runs for exactly the number of iterations specified. Early stopping makes sense with mini-batch SGD where loss is noisy — not with full-batch where every step is smooth and consistent.
+</details>
+
 ---
 
 ## Roadmap

@@ -327,7 +327,7 @@ subroutine fit_network(net,X,y,rl,iteration,sample_size,N,loss,lamda)
     real(real64), allocatable :: y_predicted(:,:)
     integer(int64),intent(in) :: N,iteration,sample_size
     integer(int64) :: i
-    real(real64) :: last_loss, lam
+    real(real64) ::  lam
     real(real64), intent(in), optional :: lamda
 
     if (present(lamda)) then
@@ -336,7 +336,6 @@ subroutine fit_network(net,X,y,rl,iteration,sample_size,N,loss,lamda)
         lam = 0.0_real64
     end if
 
-    last_loss = 0.0_real64
 
     if (allocated(delta)) deallocate(delta)
     allocate(delta(N))
@@ -353,10 +352,10 @@ subroutine fit_network(net,X,y,rl,iteration,sample_size,N,loss,lamda)
         loss = -sum(y * log(y_predicted + 1.0e-15_real64)) / sample_size
         
         call backward_pass_network(delta,net,X,y,y_predicted,N,sample_size,rl,lam)
-        if ( abs(last_loss - loss) .lt. 1e-8_real64 ) then
-            exit
+
+        if ( mod(i,100) .eq. 0 ) then
+            print *, 'Iteration:', i, ' Loss:', loss
         end if
-        last_loss = loss
     end do
 end subroutine fit_network
 
