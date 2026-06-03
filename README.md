@@ -87,7 +87,8 @@ This repository implements a **Non-Linear Classifier** — a neural engine capab
 - Eliminated overfitting: test accuracy matches training accuracy
 - New `sgd` module — clean separation from core network module
 - Model saving and loading — binary serialization of weights and biases to disk
-- New `SaveingData` module — `save_network` and `load_network` subroutines
+- New `SaveingData` module — `save_network`, `load_network`, `save_pytorch`, `load_pytorch`
+- PyTorch-compatible export format — weights stored as `(out, in)` with Python loader utility
 - Classes derived from loaded network — no need to re-enter architecture on load
 - **Target achieved: 98% test accuracy on MNIST**
 
@@ -106,12 +107,14 @@ AI-from-scratch/
 ├── sgd/
 │   └── sgd.f90                   # Mini-batch SGD module: sgd_fit, sgd_shuffle (Phase 8)
 ├── saving_file/
-│   └── save_file.f90             # Model serialization: save_network, load_network (Phase 8)
+│   └── save_file.f90             # Model serialization: save_network, load_network,
+│                                 #   save_pytorch, load_pytorch (Phase 8)
 ├── file_system/
 │   └── binfile.f90               # Binary file I/O module: bswap32, read_int32, read_images, read_labels
 ├── main.f90                      # Main program — MNIST pipeline (Phase 7/8)
 ├── main_phase3.f90               # Archived Phase 3 main program
 ├── main_phase4_5_6.f90           # Archived Phase 4/5/6 main program
+├── load_pytorch.py               # Python utility to load Fortran-saved weights (numpy only)
 ├── makefile                      # Cross-platform build system (written with Claude assistance)
 └── README.md
 ```
@@ -144,6 +147,7 @@ AI-from-scratch/
 | **Index-Based Batching** | Shuffle integer indices only — no data matrix copying |
 | **Model Saving** | Binary serialization of all layer weights and biases to disk |
 | **Model Loading** | Restore full network from file — architecture inferred from saved dimensions |
+| **PyTorch Export** | Save weights in `(out, in)` layout readable by `load_pytorch.py` |
 
 ---
 
@@ -258,6 +262,18 @@ for each layer:
 **Architecture inference on load:** When loading, `current_neurons` and `prev_neurons` are read from the file — no need to re-enter the architecture. `classes` is derived as `size(net(N)%W, 2)` from the loaded network.
 
 **Type consistency:** All integer metadata written as `int64` explicitly using `int(..., int64)` — mixing `int32` from `size()` with `int64` reads causes silent corruption (wrong values, not a crash).
+
+### 11. Phase 8 — PyTorch Export Format
+
+Fortran stores weight matrices as `(in_features, out_features)` — column-major, input rows. PyTorch stores them transposed: `(out_features, in_features)`. `save_pytorch` writes `transpose(W)` so the Python loader gets the correct shape directly.
+
+The binary format is simple enough to read with numpy alone — no pickle, no special libraries:
+
+```python
+W = np.frombuffer(f.read(8 * out * inp), dtype=np.float64).reshape(out, inp)
+```
+
+This is not a native `.pt` file — it is a raw binary format with PyTorch-style weight layout, readable by `load_pytorch.py`.
 
 ---
 
@@ -393,6 +409,12 @@ pacman -S mingw-w64-ucrt-x86_64-openblas
 - `t10k-labels-idx1-ubyte`
 
 Available from: https://github.com/fgnt/mnist
+
+**Python loader (optional):**
+```bash
+pip install numpy
+python load_pytorch.py
+```
 
 ---
 

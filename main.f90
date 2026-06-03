@@ -15,13 +15,17 @@ program main
     integer(int64), allocatable :: neurons(:)
 
     mode = 0
-    print *, 'Enter 1 to load model and anything else integer to train model'
+    print *, 'Enter 1 to load model, 2 to load from pytorch and anything else integer to train model'
     read (*,*) mode
 
     if ( mode .eq. 1 ) then
         print *, 'Enter file name'
         read(*,*) savefile_name
         call load_network(net,savefile_name,N)
+    else if (mode .eq. 2) then
+        print *, 'Enter file name'
+        read(*,*) savefile_name
+        call load_pytorch(net,savefile_name,N)
     else
     print *, 'Enter file name:'
     read (*,*) filename
@@ -152,13 +156,17 @@ program main
     print *, 'test Accuracy =', acc
 
     mode = 0
-    print *,'Enter 1 to save file and any other integer to continue'
+    print *,'Enter 1 to save file, 2 to save in pytorch format, and any other integer to continue'
     read(*,*) mode
 
     if ( mode .eq. 1 ) then
         print *,'Enter file name'
         read(*,*) savefile_name
         call save_network(net,savefile_name)
+    else if (mode .eq. 2) then
+        print *,'Enter file name'
+        read(*,*) savefile_name
+        call save_pytorch(net,savefile_name)
     end if
 
 end program main
