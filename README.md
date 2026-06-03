@@ -606,11 +606,113 @@ Same problem repeated for `size(net(i)%b)` and `size(net(i)%W,1)` — both retur
 - [x] Phase 6 — BLAS/LAPACK integration (OpenBLAS DGEMM)
 - [x] Phase 7 — Binary data pipeline (IDX format, MNIST training and test evaluation)
 - [x] Phase 8 — Mini-batch SGD + model saving (98% test accuracy achieved)
-- [ ] Phase 9 — CUDA/GPU acceleration via WSL2 + NVHPC + OpenACC
+- [ ] Phase 9 — GPU acceleration + Batch Normalization (in progress)
 - [ ] **Final Benchmark** — Sub-60s training at >98% test accuracy on GPU
 
 ---
 
-## Part of the *AI From Scratch* Series
+## Phase 9 Checkpoint
 
-This project is one step in a larger journey to build AI primitives from first principles using low-level languages. Each module builds on the last — with full transparency into design decisions, mathematical derivations, hard-won lessons from real bugs, and honest acknowledgment of where AI assistance was used.
+> **Purpose:** This section is a living document. It records what has been understood, what is in progress, and what comes next — so work can resume across different sessions without repeating ground already covered.
+
+### What Phase 9 Covers
+
+Three distinct topics, in learning order:
+
+1. **GPU programming model** — how a GPU executes code (threads, warps, SIMT)
+2. **Batch Normalization** — new math that changes forward pass, backward pass, and what gets saved
+3. **OpenACC** — Fortran pragmas that offload work to the GPU
+
+---
+
+### Topic 1: GPU Programming Model
+
+**Status:** 🔲 In progress
+
+**Goal:** Understand how a GPU executes work before writing a single pragma.
+
+**Key concept being studied:**
+A GPU has thousands of cores (e.g. RTX 3080 has 8704). Unlike CPU cores, they execute in lock-step groups called **warps** (32 threads each). All threads in a warp execute the same instruction simultaneously — this is called **SIMT** (Single Instruction, Multiple Threads).
+
+**The fundamental question to answer before moving on:**
+
+In the forward pass $H = \text{ReLU}(XW + b)$ with $X$ shape $(256 \times 784)$ and $W$ shape $(784 \times 512)$, giving $H$ of shape $(256 \times 512)$ — that is 131,072 output elements. If you have 8704 GPU cores, how do you assign one output element to one thread? What does each thread compute, and what does it need to read from memory?
+
+*(Answer this before proceeding to OpenACC.)*
+
+---
+
+### Topic 2: Batch Normalization
+
+**Status:** 🔲 Not started
+
+**Goal:** Derive and implement batch norm forward pass, backward pass, and parameter saving.
+
+**Why it's needed:**
+Phase 8 used He initialization to prevent vanishing gradients at the start of training. But as training progresses, the distribution of activations at each layer shifts — a problem called **internal covariate shift**. Batch norm fixes this by normalizing layer inputs at every step, which also allows higher learning rates and reduces sensitivity to initialization.
+
+**Math to derive (in order):**
+
+Forward pass — for a mini-batch of activations $Z$ with shape $(B \times d)$:
+
+$$\mu = \frac{1}{B} \sum_{i=1}^{B} Z_i \quad \text{(batch mean, shape } d\text{)}$$
+
+$$\sigma^2 = \frac{1}{B} \sum_{i=1}^{B} (Z_i - \mu)^2 \quad \text{(batch variance, shape } d\text{)}$$
+
+$$\hat{Z}_i = \frac{Z_i - \mu}{\sqrt{\sigma^2 + \epsilon}} \quad \text{(normalize)}$$
+
+$$\tilde{Z}_i = \gamma \odot \hat{Z}_i + \beta \quad \text{(scale and shift)}$$
+
+$\gamma$ and $\beta$ are **learned parameters** (shape $d$), initialized to 1 and 0 respectively.
+
+Backward pass — gradients to derive:
+$$\frac{\partial L}{\partial \gamma}, \quad \frac{\partial L}{\partial \beta}, \quad \frac{\partial L}{\partial Z}$$
+
+At inference time, batch statistics $\mu$ and $\sigma^2$ are replaced by **running averages** accumulated during training (using a momentum parameter, typically 0.9).
+
+**New parameters to save per layer:** $\gamma$, $\beta$, running mean, running variance.
+
+**Questions to work through before implementing:**
+- Where in the forward pass does batch norm go? Before ReLU or after?
+- Why does batch norm make the bias $b$ in $H = \text{ReLU}(XW + b)$ redundant?
+- What changes in the backward pass delta recurrence when batch norm is inserted?
+
+---
+
+### Topic 3: OpenACC
+
+**Status:** 🔲 Not started
+
+**Prerequisites:** Topics 1 and 2 complete.
+
+**Goal:** Offload forward pass, backward pass, and SGD loop to GPU using OpenACC pragmas.
+
+**Environment required:**
+- WSL2 (Windows Subsystem for Linux 2)
+- NVIDIA GPU with CUDA support
+- NVHPC compiler (replaces gfortran for GPU builds)
+
+**Key OpenACC concepts to learn:**
+- `!$acc data` — declare what arrays live on the GPU
+- `!$acc parallel loop` — parallelize a loop across GPU threads
+- `!$acc kernels` — let the compiler find parallelism automatically
+- Data movement: `copyin`, `copyout`, `copy`, `create` — controlling when data moves between CPU and GPU memory
+
+**Architecture decision to make:**
+The new Phase 9 file rewrites forward pass, backward pass, and SGD from scratch (separate from the Phase 8 modules). This avoids the memory reallocation bugs from the previous attempt. The clean separation also means batch norm can be integrated natively rather than retrofitted.
+
+---
+
+### Known Issues from Previous Phase 9 Attempt
+
+- Memory reallocation errors when offloading to GPU — allocatable arrays inside derived types caused problems with OpenACC data directives
+- Root cause: OpenACC cannot track Fortran allocatable pointers that are reallocated mid-region
+- Fix strategy: pre-allocate all arrays once before the training loop; no allocation inside `!$acc data` regions
+
+---
+
+### Session Log
+
+| Session | Progress |
+|---------|----------|
+| Session 1 | Defined Phase 9 scope: GPU model + batch norm math + OpenACC. Identified three learning topics in order. Confirmed starting point: GPU thread model. |
