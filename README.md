@@ -282,20 +282,32 @@ This is not a native `.pt` file — it is a raw binary format with PyTorch-style
 ### 1. No Validation Set
 The engine currently evaluates on training accuracy and test accuracy only. There is no validation split for hyperparameter tuning. A proper pipeline would reserve samples from the training set as a validation set and never touch the test set until the final evaluation.
 
+> **Not yet assigned to a phase.** Will be added when hyperparameter tuning becomes a bottleneck.
+
 ### 2. No Dropout
 Dropout — randomly zeroing neurons during training — is one of the most effective regularization techniques for neural networks. It is not implemented.
+
+> **Tackled in Phase 10.** See Phase 10 Checkpoint → Topic 1.
 
 ### 3. No Adaptive Learning Rate
 The learning rate is fixed throughout training. Methods like Adam, RMSProp, or even simple learning rate decay would allow faster early progress and finer convergence later.
 
+> **Tackled in Phase 10.** See Phase 10 Checkpoint → Topic 2.
+
 ### 4. Windows-Only GPU Path Blocked
 Phase 9 (GPU acceleration via OpenACC) requires NVHPC, which does not support Windows natively. This requires WSL2 — still on the roadmap.
+
+> **Tackled in Phase 9.** Requires WSL2 + NVHPC installation before OpenACC work begins.
 
 ### 5. No Batch Normalization
 Batch normalization stabilizes training in deep networks by normalizing layer inputs. Without it, deeper architectures (4+ layers) may train poorly even with He initialization.
 
+> **Tackled in Phase 9.** See Phase 9 Checkpoint → Topic 2.
+
 ### 6. Training Time at Scale
 Architecture `[512, 256, 128, 10]` at 1000 epochs takes ~4.6 hours on CPU. GPU acceleration (Phase 9) is the next step to make deep experiments practical.
+
+> **Tackled in Phase 9.** Target: sub-60s training on GPU via OpenACC + cuBLAS.
 
 ---
 
@@ -607,6 +619,7 @@ Same problem repeated for `size(net(i)%b)` and `size(net(i)%W,1)` — both retur
 - [x] Phase 7 — Binary data pipeline (IDX format, MNIST training and test evaluation)
 - [x] Phase 8 — Mini-batch SGD + model saving (98% test accuracy achieved)
 - [ ] Phase 9 — GPU acceleration + Batch Normalization (in progress)
+- [ ] Phase 10 — Dropout regularization + Adaptive optimizers (Adam)
 - [ ] **Final Benchmark** — Sub-60s training at >98% test accuracy on GPU
 
 ---
@@ -716,3 +729,88 @@ The new Phase 9 file rewrites forward pass, backward pass, and SGD from scratch 
 | Session | Progress |
 |---------|----------|
 | Session 1 | Defined Phase 9 scope: GPU model + batch norm math + OpenACC. Identified three learning topics in order. Confirmed starting point: GPU thread model. |
+| Session 2 | GPU thread model complete. Shared memory = GPU cache analogy established. Tiling strategy understood. Starting batch norm math. |
+
+---
+
+## Phase 10 Checkpoint
+
+> **Status:** 🔲 Not started — begins after Phase 9 is complete.
+
+### What Phase 10 Covers
+
+Two independent improvements to the training pipeline:
+
+1. **Dropout** — regularization by randomly zeroing neurons during training
+2. **Adam optimizer** — adaptive learning rate replacing fixed-rate SGD
+
+---
+
+### Topic 1: Dropout
+
+**Status:** 🔲 Not started
+
+**Goal:** Derive and implement dropout forward pass, backward pass, and the inference-time correction.
+
+**Why it's needed:**
+Phase 8 eliminated the generalization gap using mini-batch noise and L2 regularization. Dropout is a complementary technique — it forces the network to learn redundant representations by randomly disabling neurons, so no single neuron can be relied upon.
+
+**Math to derive:**
+
+During training, for each hidden layer activation $H$ with shape $(B \times d)$, a binary mask $M$ is sampled:
+
+$$M_{ij} \sim \text{Bernoulli}(p) \quad \text{(keep probability } p\text{, typically 0.5–0.8)}$$
+
+$$\tilde{H}_{ij} = \frac{H_{ij} \cdot M_{ij}}{p} \quad \text{(inverted dropout — scale up to preserve expected value)}$$
+
+The division by $p$ is called **inverted dropout**. It ensures the expected value of $\tilde{H}$ equals $H$, so no correction is needed at inference time.
+
+Backward pass — the mask is saved from the forward pass and reused:
+
+$$\frac{\partial L}{\partial H} = \frac{\partial L}{\partial \tilde{H}} \cdot \frac{M}{p}$$
+
+**Questions to work through before implementing:**
+- Why does dividing by $p$ during training mean you do nothing special at inference time?
+- Dropout is only active during training, not evaluation. What flag controls this in your forward pass?
+- Where does dropout go relative to batch norm and ReLU? (Convention: Linear → BatchNorm → ReLU → Dropout)
+- How does dropout interact with the delta recurrence? Which line in `backward_pass_network` changes?
+
+---
+
+### Topic 2: Adam Optimizer
+
+**Status:** 🔲 Not started
+
+**Goal:** Derive the Adam update rule and understand why it converges faster than fixed-rate SGD.
+
+**Math to derive:**
+
+Adam maintains two moving averages per weight:
+
+$$m_t = \beta_1 m_{t-1} + (1 - \beta_1) g_t \quad \text{(first moment)}$$
+
+$$v_t = \beta_2 v_{t-1} + (1 - \beta_2) g_t^2 \quad \text{(second moment)}$$
+
+Typical values: $\beta_1 = 0.9$, $\beta_2 = 0.999$. Bias correction (because $m_0 = v_0 = 0$):
+
+$$\hat{m}_t = \frac{m_t}{1 - \beta_1^t}, \quad \hat{v}_t = \frac{v_t}{1 - \beta_2^t}$$
+
+Weight update:
+
+$$W_t = W_{t-1} - \eta \cdot \frac{\hat{m}_t}{\sqrt{\hat{v}_t} + \epsilon}, \quad \epsilon \approx 10^{-8}$$
+
+**Key insight:** Effective step size per weight is $\eta / \sqrt{\hat{v}_t}$. Large historical gradients → smaller steps. Small historical gradients → larger steps. This is the adaptive part.
+
+**Questions to work through before implementing:**
+- Why does $m_0 = v_0 = 0$ bias early estimates, and how does bias correction fix this?
+- Adam stores $m$ and $v$ for every weight. How much extra memory relative to storing weights alone?
+- What new arrays are needed in your `layer` derived type?
+- Should $m$ and $v$ be saved to disk when saving the model? What happens if you resume training without them?
+
+---
+
+### Session Log
+
+| Session | Progress |
+|---------|----------|
+| Session 1 | Defined Phase 10 scope: dropout + Adam. Added checkpoints to README. |
